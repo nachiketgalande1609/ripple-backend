@@ -4,11 +4,9 @@ const jwt = require("jsonwebtoken");
 const db = require("../db");
 const router = express.Router();
 
-// Register user
 router.post("/register", async (req, res) => {
     const { email, username, password } = req.body;
 
-    // Hash the password before storing it
     const hashedPassword = await bcrypt.hash(password, 10);
 
     const checkUserQuery = "SELECT * FROM users WHERE email = ? OR username = ?";
@@ -21,7 +19,6 @@ router.post("/register", async (req, res) => {
             });
         }
 
-        // If a user with the email or username already exists, return a specific error message
         if (result.length > 0) {
             const existingUser = result[0];
             if (existingUser.email === email) {
@@ -40,7 +37,6 @@ router.post("/register", async (req, res) => {
             }
         }
 
-        // Proceed to insert the new user if no conflict
         const insertQuery = "INSERT INTO users (username, email, password) VALUES (?, ?, ?)";
         db.query(insertQuery, [username, email, hashedPassword], (err, result) => {
             if (err) {
@@ -97,7 +93,7 @@ router.post("/login", (req, res) => {
                     id: user.id,
                     username: user.username,
                     email: user.email,
-                    profile_picture_url: user.profile_picture_url,
+                    profile_picture_url: user.profile_picture,
                 },
             },
         });
