@@ -6,9 +6,7 @@ const { getTimeAgo } = require("../utils/utils");
 router.get(["/"], (req, res) => {
     const { userId } = req.params.userId ? req.params : req.query;
 
-    let postsQuery = "SELECT u.username, u.profile_picture, p.* FROM posts p INNER JOIN users u ON p.user_id = u.id";
-
-    postsQuery += " ORDER BY p.created_at DESC;";
+    let postsQuery = "SELECT u.username, u.profile_picture, p.* FROM posts p INNER JOIN users u ON p.user_id = u.id ORDER BY p.created_at DESC;";
 
     db.query(postsQuery, (err, result) => {
         if (err) {
@@ -74,11 +72,12 @@ router.get(["/"], (req, res) => {
 
                     // Fetch comments for each post
                     let commentsQuery = `
-                        SELECT c.id, c.post_id, c.user_id, c.content, c.parent_comment_id, c.created_at, c.updated_at, u.username AS commenter_username, u.profile_picture AS commenter_profile_picture
+                        SELECT c.id, c.post_id, c.user_id, c.content, c.parent_comment_id, c.created_at, c.updated_at, 
+                               u.username AS commenter_username, u.profile_picture AS commenter_profile_picture
                         FROM comments c
                         INNER JOIN users u ON c.user_id = u.id
                         WHERE c.post_id IN (?)
-                        ORDER BY c.created_at ASC;
+                        ORDER BY c.created_at DESC;
                     `;
 
                     db.query(commentsQuery, [postIds], (err, commentsResult) => {
@@ -90,11 +89,12 @@ router.get(["/"], (req, res) => {
                             });
                         }
 
-                        // Organize comments by post_id
+                        // Organize comments by post_id and set timeAgo for each comment
                         const commentsByPostId = commentsResult.reduce((acc, comment) => {
                             if (!acc[comment.post_id]) {
                                 acc[comment.post_id] = [];
                             }
+                            comment.timeAgo = getTimeAgo(new Date(comment.created_at)); // Set timeAgo for comment
                             acc[comment.post_id].push(comment);
                             return acc;
                         }, {});
@@ -194,7 +194,7 @@ router.get(["/:userId"], (req, res) => {
                 FROM comments c
                 INNER JOIN users u ON c.user_id = u.id
                 WHERE c.post_id IN (?)
-                ORDER BY c.created_at ASC;
+                ORDER BY c.created_at DESC;
             `;
 
             db.query(commentsQuery, [postIds], (err, commentsResult) => {
@@ -211,6 +211,7 @@ router.get(["/:userId"], (req, res) => {
                     if (!acc[comment.post_id]) {
                         acc[comment.post_id] = [];
                     }
+                    comment.timeAgo = getTimeAgo(new Date(comment.created_at)); // Set timeAgo for comment
                     acc[comment.post_id].push(comment);
                     return acc;
                 }, {});
