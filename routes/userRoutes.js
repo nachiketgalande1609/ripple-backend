@@ -103,8 +103,9 @@ router.post("/login", (req, res) => {
 router.get("/profile/:userId", (req, res) => {
     const { userId } = req.params;
 
-    const query = "SELECT id, username, email, bio, profile_picture FROM users WHERE id = ?";
-    db.query(query, [userId], (err, results) => {
+    const userQuery = "SELECT id, username, email, bio, profile_picture FROM users WHERE id = ?";
+
+    db.query(userQuery, [userId], (err, userResults) => {
         if (err) {
             return res.status(500).json({
                 success: false,
@@ -113,8 +114,7 @@ router.get("/profile/:userId", (req, res) => {
             });
         }
 
-        // If no user found, return a 404 error
-        if (results.length === 0) {
+        if (userResults.length === 0) {
             return res.status(404).json({
                 success: false,
                 error: "User not found",
@@ -122,18 +122,35 @@ router.get("/profile/:userId", (req, res) => {
             });
         }
 
-        // If user found, return the user data
-        const user = results[0];
-        res.status(200).json({
-            success: true,
-            error: null,
-            data: {
-                id: user.id,
-                username: user.username,
-                email: user.email,
-                bio: user.bio,
-                profile_picture: user.profile_picture,
-            },
+        const user = userResults[0];
+
+        const postCountQuery = "SELECT COUNT(id) AS posts_count FROM posts WHERE user_id = ?";
+
+        db.query(postCountQuery, [userId], (err, postResults) => {
+            if (err) {
+                return res.status(500).json({
+                    success: false,
+                    error: err.message,
+                    data: null,
+                });
+            }
+
+            const postsCount = postResults[0].posts_count || 0;
+
+            res.status(200).json({
+                success: true,
+                error: null,
+                data: {
+                    id: user.id,
+                    username: user.username,
+                    email: user.email,
+                    bio: user.bio,
+                    profile_picture: user.profile_picture,
+                    posts_count: postsCount,
+                    followers_count: 0,
+                    following_count: 0,
+                },
+            });
         });
     });
 });
