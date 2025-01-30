@@ -104,10 +104,8 @@ router.post("/login", (req, res) => {
     });
 });
 
-router.post("/profile", (req, res) => {
-    const { userId } = req.body;
-
-    console.log(userId);
+router.get("/profile/:userId", (req, res) => {
+    const { userId } = req.params;
 
     const query = "SELECT id, username, email, bio, profile_picture FROM users WHERE id = ?";
     db.query(query, [userId], (err, results) => {
