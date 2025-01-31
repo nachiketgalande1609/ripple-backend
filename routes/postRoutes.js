@@ -148,6 +148,14 @@ router.get(["/:userId"], (req, res) => {
             });
         }
 
+        if (result.length === 0) {
+            return res.status(200).json({
+                success: true,
+                error: null,
+                data: [],
+            });
+        }
+
         const postIds = result.map((post) => post.id);
 
         let likesQuery = `
@@ -187,6 +195,15 @@ router.get(["/:userId"], (req, res) => {
                     post.liked_by_current_user = likedPostsByCurrentUser.has(post.id) ? 1 : 0;
                 }
             });
+
+            // If there are no post IDs, return the posts without comments
+            if (postIds.length === 0) {
+                return res.status(200).json({
+                    success: true,
+                    error: null,
+                    data: result,
+                });
+            }
 
             // Fetch comments for each post
             let commentsQuery = `
