@@ -2,6 +2,7 @@ const express = require("express");
 const db = require("../db");
 const router = express.Router();
 const { getTimeAgo } = require("../utils/utils");
+const { createNotification } = require("../utils/utils");
 
 router.get(["/"], (req, res) => {
     const { userId } = req.params.userId ? req.params : req.query;
@@ -398,10 +399,10 @@ router.post("/like", (req, res) => {
                     });
                 }
 
-                // Calculate the updated like count from the likes table
-                const likesCountQuery = "SELECT COUNT(*) AS like_count FROM likes WHERE post_id = ?";
+                // Get the user ID of the post author
+                const getPostAuthorQuery = "SELECT user_id FROM posts WHERE id = ?";
 
-                db.query(likesCountQuery, [postId], (err, countResult) => {
+                db.query(getPostAuthorQuery, [postId], (err, postResult) => {
                     if (err) {
                         return res.status(500).json({
                             success: false,
@@ -410,11 +411,54 @@ router.post("/like", (req, res) => {
                         });
                     }
 
-                    res.status(200).json({
-                        success: true,
-                        message: "Post liked successfully.",
-                        like_count: countResult[0].like_count,
-                    });
+                    const postAuthorId = postResult[0]?.user_id;
+                    if (!postAuthorId) {
+                        return res.status(404).json({
+                            success: false,
+                            error: "Post not found.",
+                            data: null,
+                        });
+                    }
+
+                    // Check if the user is liking their own post
+                    if (userId === postAuthorId) {
+                        return res.status(200).json({
+                            success: true,
+                            message: "You liked your own post.",
+                            like_count: result.length,
+                        });
+                    }
+
+                    // Create a notification for the post's author
+                    const notificationMessage = `liked your post.`;
+                    createNotification(postAuthorId, userId, "like", notificationMessage, postId)
+                        .then(() => {
+                            // Calculate the updated like count from the likes table
+                            const likesCountQuery = "SELECT COUNT(*) AS like_count FROM likes WHERE post_id = ?";
+
+                            db.query(likesCountQuery, [postId], (err, countResult) => {
+                                if (err) {
+                                    return res.status(500).json({
+                                        success: false,
+                                        error: err.message,
+                                        data: null,
+                                    });
+                                }
+
+                                res.status(200).json({
+                                    success: true,
+                                    message: "Post liked successfully.",
+                                    like_count: countResult[0].like_count,
+                                });
+                            });
+                        })
+                        .catch((err) => {
+                            return res.status(500).json({
+                                success: false,
+                                error: err.message,
+                                data: null,
+                            });
+                        });
                 });
             });
         }
@@ -443,10 +487,54 @@ router.post("/comment", (req, res) => {
             });
         }
 
-        res.status(201).json({
-            success: true,
-            message: "Comment added successfully",
-            commentId: result.insertId,
+        const commentId = result.insertId;
+
+        const getPostAuthorQuery = "SELECT user_id FROM posts WHERE id = ?";
+
+        db.query(getPostAuthorQuery, [postId], (err, postResult) => {
+            if (err) {
+                return res.status(500).json({
+                    success: false,
+                    error: err.message,
+                    data: null,
+                });
+            }
+
+            const postAuthorId = postResult[0]?.user_id;
+            if (!postAuthorId) {
+                return res.status(404).json({
+                    success: false,
+                    error: "Post not found.",
+                    data: null,
+                });
+            }
+
+            // Check if the user is commenting on their own post
+            if (userId === postAuthorId) {
+                return res.status(200).json({
+                    success: true,
+                    message: "You commented on your own post.",
+                    commentId: result.insertId,
+                });
+            }
+
+            // Create a notification for the post's author, including the comment text and comment ID
+            const notificationMessage = `commented on your post: "${comment}"`; // Include the comment content in the notification
+            createNotification(postAuthorId, userId, "comment", notificationMessage, postId, commentId)
+                .then(() => {
+                    res.status(201).json({
+                        success: true,
+                        message: "Comment added and notification sent successfully.",
+                        commentId: result.insertId,
+                    });
+                })
+                .catch((err) => {
+                    return res.status(500).json({
+                        success: false,
+                        error: err.message,
+                        data: null,
+                    });
+                });
         });
     });
 });

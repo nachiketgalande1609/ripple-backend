@@ -219,6 +219,7 @@ router.get("/profile/:userId", (req, res) => {
 router.post("/follow", async (req, res) => {
     const { followerId, followingId } = req.body;
 
+    // Input validation
     if (!followerId || !followingId) {
         return res.status(400).json({
             success: false,
@@ -235,6 +236,7 @@ router.post("/follow", async (req, res) => {
         });
     }
 
+    // Check if the follow relationship already exists
     const checkFollowQuery = "SELECT * FROM followers WHERE follower_id = ? AND following_id = ?";
     db.query(checkFollowQuery, [followerId, followingId], (err, result) => {
         if (err) {
@@ -253,6 +255,7 @@ router.post("/follow", async (req, res) => {
             });
         }
 
+        // Insert the follow relationship
         const insertFollowQuery = "INSERT INTO followers (follower_id, following_id) VALUES (?, ?)";
         db.query(insertFollowQuery, [followerId, followingId], (err, result) => {
             if (err) {
@@ -263,12 +266,34 @@ router.post("/follow", async (req, res) => {
                 });
             }
 
-            res.status(201).json({
-                success: true,
-                error: null,
-                data: {
-                    message: `User ${followerId} is now following user ${followingId}`,
-                },
+            // Create a notification for the follow action
+            const notificationMessage = `started following you.`;
+            const insertNotificationQuery = `
+                INSERT INTO notifications (user_id, sender_id, type, message, created_at)
+                VALUES (?, ?, 'follow', ?, NOW());
+            `;
+
+            db.query(insertNotificationQuery, [followingId, followerId, notificationMessage], (err, result) => {
+                if (err) {
+                    return res.status(500).json({
+                        success: false,
+                        error: err.message,
+                        data: null,
+                    });
+                }
+
+                // Success response
+                res.status(201).json({
+                    success: true,
+                    error: null,
+                    data: {
+                        message: `User ${followerId} is now following user ${followingId}`,
+                        notification: {
+                            id: result.insertId,
+                            message: notificationMessage,
+                        },
+                    },
+                });
             });
         });
     });
@@ -318,6 +343,42 @@ router.get("/search", (req, res) => {
             error: null,
             data: {
                 users: results,
+            },
+        });
+    });
+});
+
+router.get("/chat/:userId", (req, res) => {
+    const { userId } = req.params;
+
+    const userQuery = "SELECT id, username, profile_picture FROM users WHERE id = ?";
+
+    db.query(userQuery, [userId], (err, userResults) => {
+        if (err) {
+            return res.status(500).json({
+                success: false,
+                error: err.message,
+                data: null,
+            });
+        }
+
+        if (userResults.length === 0) {
+            return res.status(404).json({
+                success: false,
+                error: "User not found",
+                data: null,
+            });
+        }
+
+        const user = userResults[0];
+
+        res.status(200).json({
+            success: true,
+            error: null,
+            data: {
+                id: user.id,
+                username: user.username,
+                profile_picture: user.profile_picture,
             },
         });
     });

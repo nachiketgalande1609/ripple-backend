@@ -1,3 +1,5 @@
+const db = require("../db");
+
 const getTimeAgo = (createdAt) => {
     const now = new Date();
     const diffInSeconds = Math.floor((now - createdAt) / 1000);
@@ -17,4 +19,20 @@ const getTimeAgo = (createdAt) => {
     return `${diffInYears} years ago`;
 };
 
-module.exports = { getTimeAgo };
+function createNotification(userId, senderId, type, message, postId = null, commentId = null) {
+    return new Promise((resolve, reject) => {
+        const insertNotificationQuery = `
+            INSERT INTO notifications (user_id, sender_id, type, message, post_id, comment_id, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, NOW());
+        `;
+
+        db.query(insertNotificationQuery, [userId, senderId, type, message, postId, commentId], (err, result) => {
+            if (err) {
+                return reject(err);
+            }
+            resolve(result);
+        });
+    });
+}
+
+module.exports = { getTimeAgo, createNotification };

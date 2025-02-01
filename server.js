@@ -5,6 +5,7 @@ const mysql = require("mysql2");
 const cors = require("cors");
 const userRoutes = require("./routes/userRoutes");
 const postRoutes = require("./routes/postRoutes");
+const notificationRoutes = require("./routes/notificationRoutes");
 
 dotenv.config();
 
@@ -22,6 +23,7 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use("/api/users", userRoutes);
 app.use("/api/posts", postRoutes);
+app.use("/api/notifications", notificationRoutes);
 
 // MySQL connection
 const db = mysql.createConnection({
