@@ -281,6 +281,61 @@ router.post("/", (req, res) => {
     });
 });
 
+router.post("/update/:postId", (req, res) => {
+    const { postId } = req.params;
+    const { content } = req.body;
+
+    if (!content) {
+        return res.status(400).json({
+            success: false,
+            error: "At least one field is required for updating.",
+            data: null,
+        });
+    }
+
+    let query = "UPDATE posts SET ";
+    const updates = [];
+    const values = [];
+
+    if (content) {
+        updates.push("content = ?");
+        values.push(content);
+    }
+
+    query += updates.join(", ") + " WHERE id = ?";
+    values.push(postId);
+
+    db.query(query, values, (err, result) => {
+        if (err) {
+            return res.status(500).json({
+                success: false,
+                error: err.message,
+                data: null,
+            });
+        }
+
+        if (result.affectedRows === 0) {
+            return res.status(404).json({
+                success: false,
+                error: "Post not found or no changes made.",
+                data: null,
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            error: null,
+            message: "Post updated successfully",
+            data: {
+                postId,
+                updatedFields: {
+                    content,
+                },
+            },
+        });
+    });
+});
+
 router.delete("/", (req, res) => {
     const { userId, postId } = req.query;
 
