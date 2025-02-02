@@ -162,7 +162,7 @@ router.get(["/:userId"], (req, res) => {
         let likesQuery = `
             SELECT post_id, user_id
             FROM likes
-            WHERE post_id IN (?) AND user_id = ?;
+            WHERE post_id IN (?);
         `;
 
         db.query(likesQuery, [postIds, userId], (err, likesResult) => {

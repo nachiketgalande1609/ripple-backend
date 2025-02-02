@@ -27,6 +27,18 @@ router.get("/:userId", (req, res) => {
             });
         }
 
+        const updateQuery = `
+            UPDATE notifications
+            SET is_read = TRUE
+            WHERE user_id = ? AND is_read = FALSE;
+        `;
+
+        db.query(updateQuery, [userId], (updateErr) => {
+            if (updateErr) {
+                console.error("Error updating notifications:", updateErr);
+            }
+        });
+
         // Modify the result to add follow status for each notification if it's a follow request
         const updatedResults = results.map((notification) => {
             // If the notification type is 'follow_request', add the follow status
@@ -40,6 +52,33 @@ router.get("/:userId", (req, res) => {
             success: true,
             error: null,
             data: updatedResults,
+        });
+    });
+});
+
+// Route to fetch unread notification count
+router.get("/count/:userId", (req, res) => {
+    const { userId } = req.params;
+
+    const query = `
+        SELECT COUNT(*) AS unread_count
+        FROM notifications
+        WHERE user_id = ? AND is_read = FALSE;
+    `;
+
+    db.query(query, [userId], (err, results) => {
+        if (err) {
+            return res.status(500).json({
+                success: false,
+                error: err.message,
+                data: null,
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            error: null,
+            data: results[0].unread_count,
         });
     });
 });
