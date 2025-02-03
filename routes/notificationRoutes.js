@@ -6,36 +6,16 @@ router.get("/:userId", (req, res) => {
     const { userId } = req.params;
 
     const query = `
-        SELECT n.id,
-            n.type,
-            n.message,
-            n.post_id,
-            n.created_at,
-            u.id AS sender_id,
-            u.username,
-            u.profile_picture,
-            p.image_url,
-            CASE
-                WHEN f.status = 'accepted' THEN true
-                WHEN f.status = 'rejected' THEN false
-                ELSE NULL
-            END AS is_following,
-            CASE
-                WHEN n.type = 'follow_request' THEN f.follower_id
-                ELSE NULL
-            END AS follower_id
-        FROM   notifications n
-            JOIN users u
-                ON n.sender_id = u.id
-            LEFT JOIN posts p
-                    ON n.post_id = p.id
-                        AND ( n.type = 'like'
-                                OR n.type = 'comment' )
-            LEFT JOIN followers f
-                    ON n.type = 'follow_request'
-                        AND f.id = n.follow_request_id
-        WHERE  n.user_id = ?
-        ORDER  BY n.created_at DESC; 
+        SELECT n.id, n.type, n.message, n.post_id, n.created_at,
+               u.id AS sender_id, u.username, u.profile_picture,
+               p.image_url, fr.status AS request_status,
+               fr.follower_id AS requester_id, fr.id AS request_id
+        FROM notifications n
+        JOIN users u ON n.sender_id = u.id
+        LEFT JOIN posts p ON n.post_id = p.id
+        LEFT JOIN follow_requests fr ON n.follow_request_id = fr.id
+        WHERE n.user_id = ?
+        ORDER BY n.created_at DESC
     `;
 
     db.query(query, [userId], (err, results) => {
@@ -47,22 +27,21 @@ router.get("/:userId", (req, res) => {
             });
         }
 
-        const updateQuery = `
-            UPDATE notifications
-            SET is_read = TRUE
-            WHERE user_id = ? AND is_read = FALSE;
-        `;
-
-        db.query(updateQuery, [userId], (updateErr) => {
+        // Update read status
+        db.query("UPDATE notifications SET is_read = TRUE WHERE user_id = ?", [userId], (updateErr) => {
             if (updateErr) {
-                console.error("Error updating notifications:", updateErr);
+                return res.status(500).json({
+                    success: false,
+                    error: updateErr.message,
+                    data: null,
+                });
             }
-        });
 
-        res.status(200).json({
-            success: true,
-            error: null,
-            data: results,
+            res.status(200).json({
+                success: true,
+                error: null,
+                data: results,
+            });
         });
     });
 });
