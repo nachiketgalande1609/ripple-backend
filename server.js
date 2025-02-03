@@ -3,9 +3,11 @@ const bodyParser = require("body-parser");
 const dotenv = require("dotenv");
 const mysql = require("mysql2");
 const cors = require("cors");
+const authRoutes = require("./routes/authRoutes");
 const userRoutes = require("./routes/userRoutes");
 const postRoutes = require("./routes/postRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
+const followRoutes = require("./routes/followRoutes");
 
 dotenv.config();
 
@@ -21,7 +23,9 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
+app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
+app.use("/api/follow", followRoutes);
 app.use("/api/posts", postRoutes);
 app.use("/api/notifications", notificationRoutes);
 
