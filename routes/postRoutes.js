@@ -3,7 +3,20 @@ const db = require("../db");
 const router = express.Router();
 const { getTimeAgo } = require("../utils/utils");
 const { createNotification } = require("../utils/utils");
+const multer = require("multer");
+const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
 
+const upload = multer({ storage: multer.memoryStorage() });
+
+const s3 = new S3Client({
+    region: process.env.AWS_REGION,
+    credentials: {
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+    },
+});
+
+// Fetch Home Page Posts
 router.get(["/"], (req, res) => {
     const { userId } = req.params.userId ? req.params : req.query;
 
@@ -129,6 +142,7 @@ router.get(["/"], (req, res) => {
     });
 });
 
+// Fetch Profile Page Posts
 router.get(["/:userId"], (req, res) => {
     const { userId } = req.params;
 
@@ -250,37 +264,62 @@ router.get(["/:userId"], (req, res) => {
     });
 });
 
-router.post("/", (req, res) => {
-    const { content, image_url, video_url, location, user_id } = req.body;
+// Create Post
+router.post("/", upload.single("image"), async (req, res) => {
+    const { content, location, user_id } = req.body;
+    const file = req.file;
 
-    if (!content || !image_url) {
+    if (!content || !file) {
         return res.status(400).json({
             success: false,
-            error: "content and image url are required.",
+            error: "Content and image are required.",
             data: null,
         });
     }
 
-    const query = "INSERT INTO posts (content, image_url, video_url, location, user_id) VALUES (?, ?, ?, ?, ?)";
+    const uploadParams = {
+        Bucket: process.env.AWS_S3_BUCKET_NAME,
+        Key: `uploads/${Date.now()}_${file.originalname}`,
+        Body: file.buffer,
+        ContentType: file.mimetype,
+        ACL: "public-read",
+    };
 
-    db.query(query, [content, image_url, video_url, location, user_id], (err, result) => {
-        if (err) {
-            return res.status(500).json({
-                success: false,
-                error: err.message,
-                data: null,
+    try {
+        const command = new PutObjectCommand(uploadParams);
+        await s3.send(command);
+
+        const imageUrl = `https://${uploadParams.Bucket}.s3.${process.env.AWS_REGION}.amazonaws.com/${uploadParams.Key}`;
+
+        // Insert post into database
+        const query = "INSERT INTO posts (content, image_url, location, user_id) VALUES (?, ?, ?, ?)";
+        db.query(query, [content, imageUrl, location, user_id], (err, result) => {
+            if (err) {
+                return res.status(500).json({
+                    success: false,
+                    error: err.message,
+                    data: null,
+                });
+            }
+
+            res.status(201).json({
+                success: true,
+                error: null,
+                message: "Post created successfully",
+                postId: result.insertId,
+                imageUrl,
             });
-        }
-
-        res.status(201).json({
-            success: true,
-            error: null,
-            message: "Post created successfully",
-            postId: result.insertId,
         });
-    });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: error.message,
+            data: null,
+        });
+    }
 });
 
+// Update Post
 router.post("/update/:postId", (req, res) => {
     const { postId } = req.params;
     const { content } = req.body;
@@ -336,6 +375,7 @@ router.post("/update/:postId", (req, res) => {
     });
 });
 
+// Delete Post
 router.delete("/", (req, res) => {
     const { userId, postId } = req.query;
 
@@ -387,6 +427,7 @@ router.delete("/", (req, res) => {
     });
 });
 
+// Like Post
 router.post("/like", (req, res) => {
     const { userId, postId } = req.body;
 
@@ -520,6 +561,7 @@ router.post("/like", (req, res) => {
     });
 });
 
+// Comment on Post
 router.post("/comment", (req, res) => {
     const { userId, postId, comment } = req.body;
 
