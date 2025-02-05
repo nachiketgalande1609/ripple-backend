@@ -137,7 +137,7 @@ router.post("/like", (req, res) => {
                         }
 
                         // Create a notification for the post's author
-                        const notificationMessage = `${userName} liked your post.`;
+                        const notificationMessage = `liked your post.`;
                         createNotification(postAuthorId, userId, "like", notificationMessage, postId)
                             .then(() => {
                                 emitUnreadNotificationCount(postAuthorId);
