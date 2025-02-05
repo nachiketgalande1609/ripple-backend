@@ -143,18 +143,81 @@ router.get(["/"], (req, res) => {
 });
 
 // Fetch Profile Page Posts
-router.get(["/:userId"], (req, res) => {
+router.post(["/:userId"], (req, res) => {
     const { userId } = req.params;
+    const { currentUserId } = req.body;
 
-    let postsQuery = "SELECT u.username, u.profile_picture, p.* FROM posts p INNER JOIN users u ON p.user_id = u.id";
+    // Query to check if the user is private
+    const privacyQuery = `
+        SELECT is_private 
+        FROM users 
+        WHERE id = ?;
+    `;
 
-    if (userId) {
-        postsQuery += " WHERE p.user_id = ?";
-    }
+    db.query(privacyQuery, [userId], (err, userResult) => {
+        if (err) {
+            return res.status(500).json({
+                success: false,
+                error: err.message,
+                data: null,
+            });
+        }
 
-    postsQuery += " ORDER BY p.created_at DESC;";
+        if (userResult.length === 0) {
+            return res.status(404).json({
+                success: false,
+                error: "User not found",
+                data: null,
+            });
+        }
 
-    db.query(postsQuery, [userId].filter(Boolean), (err, result) => {
+        const isPrivate = userResult[0].is_private;
+
+        if (isPrivate && currentUserId != userId) {
+            // Check if the current user is following this private account
+            const followCheckQuery = `
+                SELECT 1 
+                FROM followers 
+                WHERE follower_id = ? AND following_id = ?;
+            `;
+
+            db.query(followCheckQuery, [currentUserId, userId], (err, followResult) => {
+                if (err) {
+                    return res.status(500).json({
+                        success: false,
+                        error: err.message,
+                        data: null,
+                    });
+                }
+
+                if (followResult.length === 0) {
+                    return res.status(403).json({
+                        success: false,
+                        error: "This account is private. You must follow the user to see their posts.",
+                        data: null,
+                    });
+                }
+
+                // User is following, so proceed with fetching posts
+                fetchPosts(userId, currentUserId, res);
+            });
+        } else {
+            // User is public, proceed with fetching posts
+            fetchPosts(userId, currentUserId, res);
+        }
+    });
+});
+
+function fetchPosts(userId, currentUserId, res) {
+    let postsQuery = `
+        SELECT u.username, u.profile_picture, p.* 
+        FROM posts p 
+        INNER JOIN users u ON p.user_id = u.id 
+        WHERE p.user_id = ? 
+        ORDER BY p.created_at DESC;
+    `;
+
+    db.query(postsQuery, [userId], (err, result) => {
         if (err) {
             return res.status(500).json({
                 success: false,
@@ -179,7 +242,7 @@ router.get(["/:userId"], (req, res) => {
             WHERE post_id IN (?);
         `;
 
-        db.query(likesQuery, [postIds, userId], (err, likesResult) => {
+        db.query(likesQuery, [postIds], (err, likesResult) => {
             if (err) {
                 return res.status(500).json({
                     success: false,
@@ -188,30 +251,20 @@ router.get(["/:userId"], (req, res) => {
                 });
             }
 
-            // Create a map of post_id to like_count
             const likeCounts = likesResult.reduce((acc, like) => {
-                acc[like.post_id] = (acc[like.post_id] || 0) + 1; // Increment like count
+                acc[like.post_id] = (acc[like.post_id] || 0) + 1;
                 return acc;
             }, {});
 
-            // Create a set of post_ids that the user has liked
             const likedPostsByCurrentUser = new Set(likesResult.map((like) => like.post_id));
 
-            // Add like count and like status to posts
             result.forEach((post) => {
                 const createdAt = new Date(post.created_at);
                 post.timeAgo = getTimeAgo(createdAt);
-
-                // Set the like count
                 post.like_count = likeCounts[post.id] || 0;
-
-                // If userId is provided, check if the current user liked the post
-                if (userId) {
-                    post.liked_by_current_user = likedPostsByCurrentUser.has(post.id) ? 1 : 0;
-                }
+                post.liked_by_current_user = likedPostsByCurrentUser.has(post.id) ? 1 : 0;
             });
 
-            // If there are no post IDs, return the posts without comments
             if (postIds.length === 0) {
                 return res.status(200).json({
                     success: true,
@@ -220,7 +273,6 @@ router.get(["/:userId"], (req, res) => {
                 });
             }
 
-            // Fetch comments for each post
             let commentsQuery = `
                 SELECT c.id, c.post_id, c.user_id, c.content, c.parent_comment_id, c.created_at, c.updated_at, u.username AS commenter_username, u.profile_picture AS commenter_profile_picture
                 FROM comments c
@@ -238,20 +290,18 @@ router.get(["/:userId"], (req, res) => {
                     });
                 }
 
-                // Organize comments by post_id
                 const commentsByPostId = commentsResult.reduce((acc, comment) => {
                     if (!acc[comment.post_id]) {
                         acc[comment.post_id] = [];
                     }
-                    comment.timeAgo = getTimeAgo(new Date(comment.created_at)); // Set timeAgo for comment
+                    comment.timeAgo = getTimeAgo(new Date(comment.created_at));
                     acc[comment.post_id].push(comment);
                     return acc;
                 }, {});
 
-                // Add comment count and comments to posts
                 result.forEach((post) => {
-                    post.comment_count = commentsByPostId[post.id] ? commentsByPostId[post.id].length : 0; // Add comment count
-                    post.comments = commentsByPostId[post.id] || []; // Add comments
+                    post.comment_count = commentsByPostId[post.id] ? commentsByPostId[post.id].length : 0;
+                    post.comments = commentsByPostId[post.id] || [];
                 });
 
                 res.status(200).json({
@@ -262,7 +312,7 @@ router.get(["/:userId"], (req, res) => {
             });
         });
     });
-});
+}
 
 // Create Post
 router.post("/", upload.single("image"), async (req, res) => {

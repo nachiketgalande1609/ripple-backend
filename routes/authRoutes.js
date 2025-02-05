@@ -64,7 +64,7 @@ router.post("/register", async (req, res) => {
 router.post("/login", (req, res) => {
     const { email, password } = req.body;
 
-    const query = "SELECT id, username, email, password, profile_picture FROM users WHERE email = ?";
+    const query = "SELECT id, username, email, password, profile_picture, is_private FROM users WHERE email = ?";
 
     db.query(query, [email], async (err, results) => {
         if (err || results.length === 0) {
@@ -97,6 +97,7 @@ router.post("/login", (req, res) => {
                     username: user.username,
                     email: user.email,
                     profile_picture_url: user.profile_picture,
+                    is_private: user.is_private,
                 },
             },
         });

@@ -9,6 +9,7 @@ const postRoutes = require("./routes/postRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
 const followRoutes = require("./routes/followRoutes");
 const searchRoutes = require("./routes/searchRoute");
+const settingsRoutes = require("./routes/settingsRoutes");
 
 dotenv.config();
 
@@ -30,6 +31,7 @@ app.use("/api/follow", followRoutes);
 app.use("/api/posts", postRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/search", searchRoutes);
+app.use("/api/settings", settingsRoutes);
 
 // MySQL connection
 const db = mysql.createConnection({
