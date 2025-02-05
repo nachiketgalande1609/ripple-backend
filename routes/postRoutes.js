@@ -5,6 +5,7 @@ const { getTimeAgo } = require("../utils/utils");
 const { createNotification } = require("../utils/utils");
 const multer = require("multer");
 const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
+const { emitUnreadNotificationCount, emitNotifications } = require("../utils/utils");
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -114,36 +115,60 @@ router.post("/like", (req, res) => {
                         });
                     }
 
-                    // Create a notification for the post's author
-                    const notificationMessage = `liked your post.`;
-                    createNotification(postAuthorId, userId, "like", notificationMessage, postId)
-                        .then(() => {
-                            // Calculate the updated like count from the likes table
-                            const likesCountQuery = "SELECT COUNT(*) AS like_count FROM likes WHERE post_id = ?";
+                    // Fetch the username of the user who liked the post
+                    const getUserNameQuery = "SELECT username FROM users WHERE id = ?";
 
-                            db.query(likesCountQuery, [postId], (err, countResult) => {
-                                if (err) {
-                                    return res.status(500).json({
-                                        success: false,
-                                        error: err.message,
-                                        data: null,
-                                    });
-                                }
-
-                                res.status(200).json({
-                                    success: true,
-                                    message: "Post liked successfully.",
-                                    like_count: countResult[0].like_count,
-                                });
-                            });
-                        })
-                        .catch((err) => {
+                    db.query(getUserNameQuery, [userId], (err, userResult) => {
+                        if (err) {
                             return res.status(500).json({
                                 success: false,
                                 error: err.message,
                                 data: null,
                             });
-                        });
+                        }
+
+                        const userName = userResult[0]?.username;
+                        if (!userName) {
+                            return res.status(404).json({
+                                success: false,
+                                error: "User not found.",
+                                data: null,
+                            });
+                        }
+
+                        // Create a notification for the post's author
+                        const notificationMessage = `${userName} liked your post.`;
+                        createNotification(postAuthorId, userId, "like", notificationMessage, postId)
+                            .then(() => {
+                                emitUnreadNotificationCount(postAuthorId);
+                                emitNotifications(postAuthorId, notificationMessage);
+
+                                const likesCountQuery = "SELECT COUNT(*) AS like_count FROM likes WHERE post_id = ?";
+
+                                db.query(likesCountQuery, [postId], (err, countResult) => {
+                                    if (err) {
+                                        return res.status(500).json({
+                                            success: false,
+                                            error: err.message,
+                                            data: null,
+                                        });
+                                    }
+
+                                    res.status(200).json({
+                                        success: true,
+                                        message: "Post liked successfully.",
+                                        like_count: countResult[0].like_count,
+                                    });
+                                });
+                            })
+                            .catch((err) => {
+                                return res.status(500).json({
+                                    success: false,
+                                    error: err.message,
+                                    data: null,
+                                });
+                            });
+                    });
                 });
             });
         }
@@ -208,6 +233,7 @@ router.post("/comment", (req, res) => {
             const notificationMessage = `commented on your post: "${comment}"`; // Include the comment content in the notification
             createNotification(postAuthorId, userId, "comment", notificationMessage, postId, commentId)
                 .then(() => {
+                    emitUnreadNotificationCount(postAuthorId);
                     res.status(201).json({
                         success: true,
                         message: "Comment added and notification sent successfully.",

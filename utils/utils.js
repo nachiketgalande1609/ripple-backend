@@ -1,4 +1,5 @@
 const db = require("../db");
+const { getIo, getUserSockets } = require("../socket");
 
 const getTimeAgo = (createdAt) => {
     const now = new Date();
@@ -35,4 +36,45 @@ function createNotification(userId, senderId, type, message, postId = null, comm
     });
 }
 
-module.exports = { getTimeAgo, createNotification };
+const emitUnreadNotificationCount = (targetUserId) => {
+    const query = `
+        SELECT COUNT(*) AS unread_count
+        FROM notifications
+        WHERE user_id = ? AND is_read = FALSE;
+    `;
+
+    db.query(query, [targetUserId], (err, results) => {
+        if (err) {
+            console.error("Error fetching unread count:", err.message);
+            return;
+        }
+
+        const unreadCount = results[0]?.unread_count || 0;
+
+        const io = getIo();
+        const userSockets = getUserSockets();
+        const receiverSocketId = userSockets[targetUserId];
+
+        if (receiverSocketId) {
+            io.to(receiverSocketId).emit("unreadCountResponse", { targetUserId, unreadCount });
+            console.log(`Unread count emitted to user ${targetUserId}: ${unreadCount}`);
+        } else {
+            console.log(`User ${targetUserId} is not online.`);
+        }
+    });
+};
+
+const emitNotifications = (targetUserId, notificationMessage) => {
+    const io = getIo();
+    const userSockets = getUserSockets();
+    const receiverSocketId = userSockets[targetUserId];
+
+    if (receiverSocketId) {
+        io.to(receiverSocketId).emit("notificationAlert", { targetUserId, notificationMessage });
+        console.log(`Notification Alert emitted to user ${targetUserId}:`, notificationMessage);
+    } else {
+        console.log(`User ${targetUserId} is not online.`);
+    }
+};
+
+module.exports = { getTimeAgo, createNotification, emitUnreadNotificationCount, emitNotifications };
