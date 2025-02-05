@@ -65,17 +65,59 @@ const io = new Server(server, {
     },
 });
 
-// Handle socket connections
+let userSockets = {}; // Store user id -> socket id mapping
+
 io.on("connection", (socket) => {
     console.log(`User connected: ${socket.id}`);
 
-    socket.on("sendMessage", (data) => {
-        console.log("Received message:", data);
-        io.emit("receiveMessage", data); // Broadcast to all clients
+    // Store user socket mapping when a user connects
+    socket.on("registerUser", (userId) => {
+        userSockets[userId] = socket.id;
+        console.log(`User ${userId} registered with socket ID: ${socket.id}`);
     });
 
+    // Handle sending messages
+    // Handle sending messages
+    socket.on("sendMessage", (data) => {
+        const { senderId, receiverId, text } = data;
+
+        // Check if the receiver is online
+        const receiverSocketId = userSockets[receiverId];
+
+        // Insert the message into the database
+        db.query(
+            `
+        INSERT INTO messages (sender_id, receiver_id, message_text, timestamp)
+        VALUES (?, ?, ?, NOW());
+        `,
+            [senderId, receiverId, text],
+            (err, results) => {
+                if (err) {
+                    console.error("Error saving message:", err.message);
+                    return;
+                }
+                console.log("Message saved to database");
+
+                // Emit the message to the receiver's socket if they are online
+                if (receiverSocketId) {
+                    io.to(receiverSocketId).emit("receiveMessage", { senderId, message_text: text });
+                    console.log(`Message sent to user ${receiverId}`);
+                } else {
+                    console.log(`User ${receiverId} is not online.`);
+                }
+            }
+        );
+    });
+
+    // Handle disconnect event and clean up the mapping
     socket.on("disconnect", () => {
-        console.log("User disconnected:", socket.id);
+        for (let userId in userSockets) {
+            if (userSockets[userId] === socket.id) {
+                delete userSockets[userId]; // Remove user from the mapping
+                console.log(`User ${userId} disconnected`);
+                break;
+            }
+        }
     });
 });
 
