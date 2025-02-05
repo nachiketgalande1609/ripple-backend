@@ -16,6 +16,215 @@ const s3 = new S3Client({
     },
 });
 
+// Like Post
+router.post("/like", (req, res) => {
+    const { userId, postId } = req.body;
+
+    if (!userId || !postId) {
+        return res.status(400).json({
+            success: false,
+            error: "User ID and Post ID are required.",
+            data: null,
+        });
+    }
+
+    const checkLikeQuery = "SELECT * FROM likes WHERE user_id = ? AND post_id = ?";
+
+    db.query(checkLikeQuery, [userId, postId], (err, result) => {
+        if (err) {
+            return res.status(500).json({
+                success: false,
+                error: err.message,
+                data: null,
+            });
+        }
+
+        if (result.length > 0) {
+            // Unlike the post
+            const removeLikeQuery = "DELETE FROM likes WHERE user_id = ? AND post_id = ?";
+
+            db.query(removeLikeQuery, [userId, postId], (err) => {
+                if (err) {
+                    return res.status(500).json({
+                        success: false,
+                        error: err.message,
+                        data: null,
+                    });
+                }
+
+                // Calculate the updated like count from the likes table
+                const likesCountQuery = "SELECT COUNT(*) AS like_count FROM likes WHERE post_id = ?";
+
+                db.query(likesCountQuery, [postId], (err, countResult) => {
+                    if (err) {
+                        return res.status(500).json({
+                            success: false,
+                            error: err.message,
+                            data: null,
+                        });
+                    }
+
+                    res.status(200).json({
+                        success: true,
+                        message: "Post unliked successfully.",
+                        like_count: countResult[0].like_count,
+                    });
+                });
+            });
+        } else {
+            // Like the post
+            const addLikeQuery = "INSERT INTO likes (user_id, post_id, created_at) VALUES (?, ?, NOW())";
+
+            db.query(addLikeQuery, [userId, postId], (err) => {
+                if (err) {
+                    return res.status(500).json({
+                        success: false,
+                        error: err.message,
+                        data: null,
+                    });
+                }
+
+                // Get the user ID of the post author
+                const getPostAuthorQuery = "SELECT user_id FROM posts WHERE id = ?";
+
+                db.query(getPostAuthorQuery, [postId], (err, postResult) => {
+                    if (err) {
+                        return res.status(500).json({
+                            success: false,
+                            error: err.message,
+                            data: null,
+                        });
+                    }
+
+                    const postAuthorId = postResult[0]?.user_id;
+                    if (!postAuthorId) {
+                        return res.status(404).json({
+                            success: false,
+                            error: "Post not found.",
+                            data: null,
+                        });
+                    }
+
+                    // Check if the user is liking their own post
+                    if (userId === postAuthorId) {
+                        return res.status(200).json({
+                            success: true,
+                            message: "You liked your own post.",
+                            like_count: result.length,
+                        });
+                    }
+
+                    // Create a notification for the post's author
+                    const notificationMessage = `liked your post.`;
+                    createNotification(postAuthorId, userId, "like", notificationMessage, postId)
+                        .then(() => {
+                            // Calculate the updated like count from the likes table
+                            const likesCountQuery = "SELECT COUNT(*) AS like_count FROM likes WHERE post_id = ?";
+
+                            db.query(likesCountQuery, [postId], (err, countResult) => {
+                                if (err) {
+                                    return res.status(500).json({
+                                        success: false,
+                                        error: err.message,
+                                        data: null,
+                                    });
+                                }
+
+                                res.status(200).json({
+                                    success: true,
+                                    message: "Post liked successfully.",
+                                    like_count: countResult[0].like_count,
+                                });
+                            });
+                        })
+                        .catch((err) => {
+                            return res.status(500).json({
+                                success: false,
+                                error: err.message,
+                                data: null,
+                            });
+                        });
+                });
+            });
+        }
+    });
+});
+
+// Comment on Post
+router.post("/comment", (req, res) => {
+    const { userId, postId, comment } = req.body;
+
+    if (!userId || !postId || !comment) {
+        return res.status(400).json({
+            success: false,
+            error: "User ID, Post ID, and Comment content are required.",
+            data: null,
+        });
+    }
+
+    const insertCommentQuery = "INSERT INTO comments (user_id, post_id, content, created_at) VALUES (?, ?, ?, NOW())";
+
+    db.query(insertCommentQuery, [userId, postId, comment], (err, result) => {
+        if (err) {
+            return res.status(500).json({
+                success: false,
+                error: err.message,
+                data: null,
+            });
+        }
+
+        const commentId = result.insertId;
+
+        const getPostAuthorQuery = "SELECT user_id FROM posts WHERE id = ?";
+
+        db.query(getPostAuthorQuery, [postId], (err, postResult) => {
+            if (err) {
+                return res.status(500).json({
+                    success: false,
+                    error: err.message,
+                    data: null,
+                });
+            }
+
+            const postAuthorId = postResult[0]?.user_id;
+            if (!postAuthorId) {
+                return res.status(404).json({
+                    success: false,
+                    error: "Post not found.",
+                    data: null,
+                });
+            }
+
+            // Check if the user is commenting on their own post
+            if (userId === postAuthorId) {
+                return res.status(200).json({
+                    success: true,
+                    message: "You commented on your own post.",
+                    commentId: result.insertId,
+                });
+            }
+
+            // Create a notification for the post's author, including the comment text and comment ID
+            const notificationMessage = `commented on your post: "${comment}"`; // Include the comment content in the notification
+            createNotification(postAuthorId, userId, "comment", notificationMessage, postId, commentId)
+                .then(() => {
+                    res.status(201).json({
+                        success: true,
+                        message: "Comment added and notification sent successfully.",
+                        commentId: result.insertId,
+                    });
+                })
+                .catch((err) => {
+                    return res.status(500).json({
+                        success: false,
+                        error: err.message,
+                        data: null,
+                    });
+                });
+        });
+    });
+});
+
 // Fetch Home Page Posts
 router.get(["/"], (req, res) => {
     const { userId } = req.params.userId ? req.params : req.query;
@@ -473,215 +682,6 @@ router.delete("/", (req, res) => {
                 message: "Post deleted successfully",
                 data: null,
             });
-        });
-    });
-});
-
-// Like Post
-router.post("/like", (req, res) => {
-    const { userId, postId } = req.body;
-
-    if (!userId || !postId) {
-        return res.status(400).json({
-            success: false,
-            error: "User ID and Post ID are required.",
-            data: null,
-        });
-    }
-
-    const checkLikeQuery = "SELECT * FROM likes WHERE user_id = ? AND post_id = ?";
-
-    db.query(checkLikeQuery, [userId, postId], (err, result) => {
-        if (err) {
-            return res.status(500).json({
-                success: false,
-                error: err.message,
-                data: null,
-            });
-        }
-
-        if (result.length > 0) {
-            // Unlike the post
-            const removeLikeQuery = "DELETE FROM likes WHERE user_id = ? AND post_id = ?";
-
-            db.query(removeLikeQuery, [userId, postId], (err) => {
-                if (err) {
-                    return res.status(500).json({
-                        success: false,
-                        error: err.message,
-                        data: null,
-                    });
-                }
-
-                // Calculate the updated like count from the likes table
-                const likesCountQuery = "SELECT COUNT(*) AS like_count FROM likes WHERE post_id = ?";
-
-                db.query(likesCountQuery, [postId], (err, countResult) => {
-                    if (err) {
-                        return res.status(500).json({
-                            success: false,
-                            error: err.message,
-                            data: null,
-                        });
-                    }
-
-                    res.status(200).json({
-                        success: true,
-                        message: "Post unliked successfully.",
-                        like_count: countResult[0].like_count,
-                    });
-                });
-            });
-        } else {
-            // Like the post
-            const addLikeQuery = "INSERT INTO likes (user_id, post_id, created_at) VALUES (?, ?, NOW())";
-
-            db.query(addLikeQuery, [userId, postId], (err) => {
-                if (err) {
-                    return res.status(500).json({
-                        success: false,
-                        error: err.message,
-                        data: null,
-                    });
-                }
-
-                // Get the user ID of the post author
-                const getPostAuthorQuery = "SELECT user_id FROM posts WHERE id = ?";
-
-                db.query(getPostAuthorQuery, [postId], (err, postResult) => {
-                    if (err) {
-                        return res.status(500).json({
-                            success: false,
-                            error: err.message,
-                            data: null,
-                        });
-                    }
-
-                    const postAuthorId = postResult[0]?.user_id;
-                    if (!postAuthorId) {
-                        return res.status(404).json({
-                            success: false,
-                            error: "Post not found.",
-                            data: null,
-                        });
-                    }
-
-                    // Check if the user is liking their own post
-                    if (userId === postAuthorId) {
-                        return res.status(200).json({
-                            success: true,
-                            message: "You liked your own post.",
-                            like_count: result.length,
-                        });
-                    }
-
-                    // Create a notification for the post's author
-                    const notificationMessage = `liked your post.`;
-                    createNotification(postAuthorId, userId, "like", notificationMessage, postId)
-                        .then(() => {
-                            // Calculate the updated like count from the likes table
-                            const likesCountQuery = "SELECT COUNT(*) AS like_count FROM likes WHERE post_id = ?";
-
-                            db.query(likesCountQuery, [postId], (err, countResult) => {
-                                if (err) {
-                                    return res.status(500).json({
-                                        success: false,
-                                        error: err.message,
-                                        data: null,
-                                    });
-                                }
-
-                                res.status(200).json({
-                                    success: true,
-                                    message: "Post liked successfully.",
-                                    like_count: countResult[0].like_count,
-                                });
-                            });
-                        })
-                        .catch((err) => {
-                            return res.status(500).json({
-                                success: false,
-                                error: err.message,
-                                data: null,
-                            });
-                        });
-                });
-            });
-        }
-    });
-});
-
-// Comment on Post
-router.post("/comment", (req, res) => {
-    const { userId, postId, comment } = req.body;
-
-    if (!userId || !postId || !comment) {
-        return res.status(400).json({
-            success: false,
-            error: "User ID, Post ID, and Comment content are required.",
-            data: null,
-        });
-    }
-
-    const insertCommentQuery = "INSERT INTO comments (user_id, post_id, content, created_at) VALUES (?, ?, ?, NOW())";
-
-    db.query(insertCommentQuery, [userId, postId, comment], (err, result) => {
-        if (err) {
-            return res.status(500).json({
-                success: false,
-                error: err.message,
-                data: null,
-            });
-        }
-
-        const commentId = result.insertId;
-
-        const getPostAuthorQuery = "SELECT user_id FROM posts WHERE id = ?";
-
-        db.query(getPostAuthorQuery, [postId], (err, postResult) => {
-            if (err) {
-                return res.status(500).json({
-                    success: false,
-                    error: err.message,
-                    data: null,
-                });
-            }
-
-            const postAuthorId = postResult[0]?.user_id;
-            if (!postAuthorId) {
-                return res.status(404).json({
-                    success: false,
-                    error: "Post not found.",
-                    data: null,
-                });
-            }
-
-            // Check if the user is commenting on their own post
-            if (userId === postAuthorId) {
-                return res.status(200).json({
-                    success: true,
-                    message: "You commented on your own post.",
-                    commentId: result.insertId,
-                });
-            }
-
-            // Create a notification for the post's author, including the comment text and comment ID
-            const notificationMessage = `commented on your post: "${comment}"`; // Include the comment content in the notification
-            createNotification(postAuthorId, userId, "comment", notificationMessage, postId, commentId)
-                .then(() => {
-                    res.status(201).json({
-                        success: true,
-                        message: "Comment added and notification sent successfully.",
-                        commentId: result.insertId,
-                    });
-                })
-                .catch((err) => {
-                    return res.status(500).json({
-                        success: false,
-                        error: err.message,
-                        data: null,
-                    });
-                });
         });
     });
 });
