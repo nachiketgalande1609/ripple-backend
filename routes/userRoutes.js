@@ -186,10 +186,10 @@ router.put("/profile/update", async (req, res) => {
     const { userId, updatedProfile } = req.body;
 
     // Validate required fields
-    if (!userId || !updatedProfile || !updatedProfile.username) {
+    if (!userId || !updatedProfile) {
         return res.status(400).json({
             success: false,
-            error: "User ID and username are required.",
+            error: "Nothing to update",
             data: null,
         });
     }
