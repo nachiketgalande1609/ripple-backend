@@ -52,6 +52,34 @@ function initializeSocket(server, db) {
             );
         });
 
+        // Handle typing event (show typing indicator)
+        socket.on("typing", (data) => {
+            const { senderId, receiverId } = data;
+            const receiverSocketId = userSockets[receiverId];
+
+            if (receiverSocketId) {
+                // Emit the typing event to the receiver
+                io.to(receiverSocketId).emit("typing", { senderId, receiverId });
+                console.log(`User ${senderId} is typing to ${receiverId}`);
+            } else {
+                console.log(`User ${receiverId} is not online.`);
+            }
+        });
+
+        socket.on("stopTyping", (data) => {
+            const { senderId, receiverId } = data;
+            const receiverSocketId = userSockets[receiverId];
+            console.log(senderId, receiverId, receiverSocketId);
+
+            if (receiverSocketId) {
+                // Emit the stopTyping event to the receiver to clear typing indicator
+                io.to(receiverSocketId).emit("stopTyping", { senderId, receiverId });
+                console.log(`User ${senderId} stopped typing to ${receiverId}`);
+            } else {
+                console.log(`User ${receiverId} is not online.`);
+            }
+        });
+
         // Handle disconnect event and clean up the mapping
         socket.on("disconnect", (reason) => {
             console.log(`User ${socket.id} disconnected due to ${reason}`);
