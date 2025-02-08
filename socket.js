@@ -18,7 +18,38 @@ function initializeSocket(server, db) {
         socket.on("registerUser", (userId) => {
             if (userSockets[userId] !== socket.id) {
                 userSockets[userId] = socket.id;
-                // console.log(`User ${userId} registered with socket ID: ${socket.id}`);
+
+                // Mark all unread messages as delivered for the user upon connection
+                db.query(`UPDATE messages SET delivered = TRUE WHERE receiver_id = ? AND delivered = FALSE`, [userId], (err) => {
+                    if (err) {
+                        console.error("Error marking messages as delivered:", err.message);
+                    } else {
+                        console.log(`All unread messages for user ${userId} marked as delivered`);
+
+                        // Query for all unread messages for this user
+                        db.query(
+                            `SELECT * FROM messages WHERE receiver_id = ? AND delivered = TRUE AND is_read = FALSE`,
+                            [userId],
+                            (err, results) => {
+                                if (err) {
+                                    console.error("Error retrieving unread messages:", err.message);
+                                    return;
+                                }
+
+                                // For each unread message, emit a 'messageDelivered' event to the sender
+                                results.forEach((message) => {
+                                    const senderSocketId = userSockets[message.sender_id];
+                                    if (senderSocketId) {
+                                        io.to(senderSocketId).emit("messageDelivered", {
+                                            messageId: message.message_id,
+                                            timestamp: new Date().toISOString(),
+                                        });
+                                    }
+                                });
+                            }
+                        );
+                    }
+                });
             }
         });
 
