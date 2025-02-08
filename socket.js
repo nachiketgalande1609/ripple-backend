@@ -24,7 +24,7 @@ function initializeSocket(server, db) {
 
         // Handle sending messages
         socket.on("sendMessage", (data) => {
-            const { senderId, receiverId, text } = data;
+            const { senderId, receiverId, text, tempId } = data;
             const receiverSocketId = userSockets[receiverId];
             const senderSocketId = userSockets[senderId];
 
@@ -42,10 +42,7 @@ function initializeSocket(server, db) {
 
                     const messageId = results.insertId; // Retrieve the inserted message ID
 
-                    io.to(senderSocketId).emit("messageSaved", {
-                        messageId,
-                        timestamp: new Date().toISOString(),
-                    });
+                    io.to(senderSocketId).emit("messageSaved", { tempId, messageId, timestamp: new Date().toISOString() });
 
                     if (receiverSocketId) {
                         io.to(receiverSocketId).emit("receiveMessage", {
@@ -65,9 +62,7 @@ function initializeSocket(server, db) {
         });
 
         socket.on("messageRead", (data) => {
-            const { messageIds, senderId, receiverId } = data; // messageIds is an array
-
-            console.log(messageIds, senderId, receiverId);
+            const { messageIds, senderId, receiverId } = data;
 
             if (!messageIds || messageIds.length === 0) {
                 console.error("No message IDs provided.");
@@ -84,7 +79,7 @@ function initializeSocket(server, db) {
                 }
                 if (senderSocketId) {
                     io.to(senderSocketId).emit("messageRead", {
-                        senderId,
+                        receiverId,
                         messageIds,
                         timestamp: new Date().toISOString(),
                     });
