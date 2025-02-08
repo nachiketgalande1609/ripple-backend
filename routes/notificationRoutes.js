@@ -46,17 +46,17 @@ router.get("/:userId", (req, res) => {
     });
 });
 
-// Route to fetch unread notification count
+// Route to fetch unread notifications and messages count
 router.get("/count/:userId", (req, res) => {
     const { userId } = req.params;
 
     const query = `
-        SELECT COUNT(*) AS unread_count
-        FROM notifications
-        WHERE user_id = ? AND is_read = FALSE;
+        SELECT 
+            (SELECT COUNT(*) FROM notifications WHERE user_id = ? AND is_read = FALSE) AS unread_notifications,
+            (SELECT COUNT(*) FROM messages WHERE receiver_id = ? AND is_read = FALSE) AS unread_messages;
     `;
 
-    db.query(query, [userId], (err, results) => {
+    db.query(query, [userId, userId], (err, results) => {
         if (err) {
             return res.status(500).json({
                 success: false,
@@ -68,7 +68,10 @@ router.get("/count/:userId", (req, res) => {
         res.status(200).json({
             success: true,
             error: null,
-            data: results[0].unread_count,
+            data: {
+                unread_notifications: results[0].unread_notifications,
+                unread_messages: results[0].unread_messages,
+            },
         });
     });
 });
