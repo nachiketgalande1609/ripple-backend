@@ -57,9 +57,6 @@ const emitUnreadNotificationCount = (targetUserId) => {
 
         if (receiverSocketId) {
             io.to(receiverSocketId).emit("unreadCountResponse", { targetUserId, unreadCount });
-            console.log(`Unread count emitted to user ${targetUserId}: ${unreadCount}`);
-        } else {
-            console.log(`User ${targetUserId} is not online.`);
         }
     });
 };
@@ -71,9 +68,6 @@ const emitNotifications = (targetUserId, notificationMessage) => {
 
     if (receiverSocketId) {
         io.to(receiverSocketId).emit("notificationAlert", { targetUserId, notificationMessage });
-        console.log(`Notification Alert emitted to user ${targetUserId}:`, notificationMessage);
-    } else {
-        console.log(`User ${targetUserId} is not online.`);
     }
 };
 

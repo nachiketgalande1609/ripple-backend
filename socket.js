@@ -18,7 +18,7 @@ function initializeSocket(server, db) {
         socket.on("registerUser", (userId) => {
             if (userSockets[userId] !== socket.id) {
                 userSockets[userId] = socket.id;
-                console.log(`User ${userId} registered with socket ID: ${socket.id}`);
+                // console.log(`User ${userId} registered with socket ID: ${socket.id}`);
             }
         });
 
@@ -64,6 +64,34 @@ function initializeSocket(server, db) {
             );
         });
 
+        socket.on("messageRead", (data) => {
+            const { messageIds, senderId, receiverId } = data; // messageIds is an array
+
+            console.log(messageIds, senderId, receiverId);
+
+            if (!messageIds || messageIds.length === 0) {
+                console.error("No message IDs provided.");
+                return;
+            }
+
+            const senderSocketId = userSockets[senderId];
+
+            // Update all messages in the database
+            db.query(`UPDATE messages SET is_read = TRUE WHERE message_id IN (?)`, [messageIds], (err) => {
+                if (err) {
+                    console.error("Error updating message status:", err.message);
+                    return;
+                }
+                if (senderSocketId) {
+                    io.to(senderSocketId).emit("messageRead", {
+                        senderId,
+                        messageIds,
+                        timestamp: new Date().toISOString(),
+                    });
+                }
+            });
+        });
+
         // Handle typing event (show typing indicator)
         socket.on("typing", (data) => {
             const { senderId, receiverId } = data;
@@ -85,11 +113,11 @@ function initializeSocket(server, db) {
 
         // Handle disconnect event and clean up the mapping
         socket.on("disconnect", (reason) => {
-            console.log(`User ${socket.id} disconnected due to ${reason}`);
+            // console.log(`User ${socket.id} disconnected due to ${reason}`);
             for (let userId in userSockets) {
                 if (userSockets[userId] === socket.id) {
                     delete userSockets[userId];
-                    console.log(`User ${userId} removed from userSockets`);
+                    // console.log(`User ${userId} removed from userSockets`);
                     break;
                 }
             }
