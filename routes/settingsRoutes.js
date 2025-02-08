@@ -5,8 +5,6 @@ const router = express.Router();
 router.patch("/privacy", (req, res) => {
     const { userId, isPrivate } = req.body;
 
-    console.log(userId, isPrivate);
-
     query = "UPDATE users SET is_private=? WHERE id=?";
 
     db.query(query, [isPrivate, userId], (updateErr) => {

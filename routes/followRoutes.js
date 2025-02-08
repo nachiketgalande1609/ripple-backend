@@ -63,8 +63,6 @@ router.post("/", async (req, res) => {
 router.post("/response", async (req, res) => {
     const { requestId, status } = req.body;
 
-    console.log(req.body);
-
     if (!requestId || !status) {
         return res.status(400).json({
             success: false,

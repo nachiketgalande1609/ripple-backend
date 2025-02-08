@@ -14,8 +14,6 @@ function initializeSocket(server, db) {
     });
 
     io.on("connection", (socket) => {
-        console.log(`User connected: ${socket.id}`);
-
         // Store user socket mapping when a user connects
         socket.on("registerUser", (userId) => {
             if (userSockets[userId] !== socket.id) {
@@ -28,25 +26,39 @@ function initializeSocket(server, db) {
         socket.on("sendMessage", (data) => {
             const { senderId, receiverId, text } = data;
             const receiverSocketId = userSockets[receiverId];
+            const senderSocketId = userSockets[senderId];
 
             db.query(
                 `
-                INSERT INTO messages (sender_id, receiver_id, message_text, timestamp)
-                VALUES (?, ?, ?, NOW());
-                `,
-                [senderId, receiverId, text],
+                    INSERT INTO messages (sender_id, receiver_id, message_text, timestamp, delivered)
+                    VALUES (?, ?, ?, NOW(), ?);
+                    `,
+                [senderId, receiverId, text, !!receiverSocketId],
                 (err, results) => {
                     if (err) {
                         console.error("Error saving message:", err.message);
                         return;
                     }
-                    console.log("Message saved to database");
+
+                    const messageId = results.insertId; // Retrieve the inserted message ID
+
+                    io.to(senderSocketId).emit("messageSaved", {
+                        messageId,
+                        timestamp: new Date().toISOString(),
+                    });
 
                     if (receiverSocketId) {
-                        io.to(receiverSocketId).emit("receiveMessage", { senderId, message_text: text });
-                        console.log(`Message sent to user ${receiverId}`);
-                    } else {
-                        console.log(`User ${receiverId} is not online.`);
+                        io.to(receiverSocketId).emit("receiveMessage", {
+                            messageId,
+                            senderId,
+                            message_text: text,
+                            timestamp: new Date().toISOString(),
+                        });
+
+                        io.to(senderSocketId).emit("messageDelivered", {
+                            messageId,
+                            timestamp: new Date().toISOString(),
+                        });
                     }
                 }
             );
@@ -58,25 +70,16 @@ function initializeSocket(server, db) {
             const receiverSocketId = userSockets[receiverId];
 
             if (receiverSocketId) {
-                // Emit the typing event to the receiver
                 io.to(receiverSocketId).emit("typing", { senderId, receiverId });
-                console.log(`User ${senderId} is typing to ${receiverId}`);
-            } else {
-                console.log(`User ${receiverId} is not online.`);
             }
         });
 
         socket.on("stopTyping", (data) => {
             const { senderId, receiverId } = data;
             const receiverSocketId = userSockets[receiverId];
-            console.log(senderId, receiverId, receiverSocketId);
 
             if (receiverSocketId) {
-                // Emit the stopTyping event to the receiver to clear typing indicator
                 io.to(receiverSocketId).emit("stopTyping", { senderId, receiverId });
-                console.log(`User ${senderId} stopped typing to ${receiverId}`);
-            } else {
-                console.log(`User ${receiverId} is not online.`);
             }
         });
 
