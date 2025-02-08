@@ -45,17 +45,34 @@ function initializeSocket(server, db) {
                     io.to(senderSocketId).emit("messageSaved", { tempId, messageId, timestamp: new Date().toISOString() });
 
                     if (receiverSocketId) {
-                        io.to(receiverSocketId).emit("receiveMessage", {
-                            messageId,
-                            senderId,
-                            message_text: text,
-                            timestamp: new Date().toISOString(),
-                        });
+                        db.query(
+                            `SELECT COUNT(*) AS unreadCount FROM messages WHERE receiver_id = ? AND is_read = FALSE`,
+                            [receiverId],
+                            (err, results) => {
+                                if (err) {
+                                    console.error("Error counting unread messages:", err.message);
+                                    return;
+                                }
 
-                        io.to(senderSocketId).emit("messageDelivered", {
-                            messageId,
-                            timestamp: new Date().toISOString(),
-                        });
+                                const unreadCount = results[0]?.unreadCount || 0;
+
+                                // Emit unread count as a separate event
+                                io.to(receiverSocketId).emit("unreadMessagesCount", { unreadCount });
+
+                                // Emit the received message
+                                io.to(receiverSocketId).emit("receiveMessage", {
+                                    messageId,
+                                    senderId,
+                                    message_text: text,
+                                    timestamp: new Date().toISOString(),
+                                });
+
+                                io.to(senderSocketId).emit("messageDelivered", {
+                                    messageId,
+                                    timestamp: new Date().toISOString(),
+                                });
+                            }
+                        );
                     }
                 }
             );
