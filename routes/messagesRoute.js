@@ -1,6 +1,17 @@
 const express = require("express");
 const router = express.Router();
 const db = require("../db");
+const multer = require("multer");
+const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
+const upload = multer({ storage: multer.memoryStorage() });
+
+const s3 = new S3Client({
+    region: process.env.AWS_REGION,
+    credentials: {
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+    },
+});
 
 // Get all messages and users for the current user
 router.get("/:currentUserId", (req, res) => {
@@ -28,7 +39,7 @@ router.get("/:currentUserId", (req, res) => {
             // Fetch all messages where the user is either sender or receiver
             db.query(
                 `
-            SELECT message_id ,sender_id, receiver_id, message_text, timestamp , delivered, is_read
+            SELECT message_id ,sender_id, receiver_id, message_text, image_url, timestamp , delivered, is_read
             FROM messages 
             WHERE sender_id = ? OR receiver_id = ?
             ORDER BY timestamp ASC;
@@ -56,6 +67,7 @@ router.get("/:currentUserId", (req, res) => {
                             message_id: msg.message_id,
                             sender_id: msg.sender_id,
                             message_text: msg.message_text,
+                            image_url: msg.image_url,
                             timestamp: msg.timestamp,
                             delivered: msg.delivered,
                             read: msg.is_read,
@@ -71,6 +83,47 @@ router.get("/:currentUserId", (req, res) => {
             );
         }
     );
+});
+
+router.post("/media", upload.single("image"), async (req, res) => {
+    const file = req.file;
+
+    if (!file) {
+        return res.status(400).json({
+            success: false,
+            error: "No file uploaded.",
+            data: null,
+        });
+    }
+
+    const uploadParams = {
+        Bucket: process.env.AWS_S3_BUCKET_NAME,
+        Key: `chat/${Date.now()}_${file.originalname}`,
+        Body: file.buffer,
+        ContentType: file.mimetype,
+        ACL: "public-read",
+    };
+
+    try {
+        const command = new PutObjectCommand(uploadParams);
+        await s3.send(command);
+
+        const imageUrl = `https://${uploadParams.Bucket}.s3.${process.env.AWS_REGION}.amazonaws.com/${uploadParams.Key}`;
+
+        return res.status(200).json({
+            success: true,
+            error: null,
+            data: {
+                imageUrl,
+            },
+        });
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            error: "Failed to upload image to S3.",
+            data: null,
+        });
+    }
 });
 
 module.exports = router;

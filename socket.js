@@ -56,23 +56,26 @@ function initializeSocket(server, db) {
 
         // Handle sending messages
         socket.on("sendMessage", (data) => {
-            const { senderId, receiverId, text, tempId } = data;
+            const { senderId, receiverId, text, tempId, imageUrl } = data;
+
+            console.log();
+
             const receiverSocketId = userSockets[receiverId];
             const senderSocketId = userSockets[senderId];
 
             db.query(
                 `
-                    INSERT INTO messages (sender_id, receiver_id, message_text, timestamp, delivered)
-                    VALUES (?, ?, ?, NOW(), ?);
+                    INSERT INTO messages (sender_id, receiver_id, message_text, image_url, timestamp, delivered)
+                    VALUES (?, ?, ?, ?, NOW(), ?);
                     `,
-                [senderId, receiverId, text, !!receiverSocketId],
+                [senderId, receiverId, text, imageUrl, !!receiverSocketId],
                 (err, results) => {
                     if (err) {
                         console.error("Error saving message:", err.message);
                         return;
                     }
 
-                    const messageId = results.insertId; // Retrieve the inserted message ID
+                    const messageId = results.insertId;
 
                     io.to(senderSocketId).emit("messageSaved", { tempId, messageId, timestamp: new Date().toISOString() });
 
@@ -88,16 +91,17 @@ function initializeSocket(server, db) {
 
                                 const unreadCount = results[0]?.unreadCount || 0;
 
-                                // Emit unread count as a separate event
                                 io.to(receiverSocketId).emit("unreadMessagesCount", { unreadCount });
 
-                                // Emit the received message
                                 io.to(receiverSocketId).emit("receiveMessage", {
                                     messageId,
                                     senderId,
                                     message_text: text,
                                     timestamp: new Date().toISOString(),
+                                    imageUrl,
                                 });
+
+                                console.log({ messageId, senderId, message_text: text, timestamp: new Date().toISOString(), imageUrl });
 
                                 io.to(senderSocketId).emit("messageDelivered", {
                                     messageId,
