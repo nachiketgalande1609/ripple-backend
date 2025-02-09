@@ -19,13 +19,14 @@ function initializeSocket(server, db) {
             if (userSockets[userId] !== socket.id) {
                 userSockets[userId] = socket.id;
 
+                const onlineUsers = Object.keys(userSockets); // Get the list of online user IDs
+                io.emit("onlineUsers", onlineUsers);
+
                 // Mark all unread messages as delivered for the user upon connection
                 db.query(`UPDATE messages SET delivered = TRUE WHERE receiver_id = ? AND delivered = FALSE`, [userId], (err) => {
                     if (err) {
                         console.error("Error marking messages as delivered:", err.message);
                     } else {
-                        console.log(`All unread messages for user ${userId} marked as delivered`);
-
                         // Query for all unread messages for this user
                         db.query(
                             `SELECT * FROM messages WHERE receiver_id = ? AND delivered = TRUE AND is_read = FALSE`,
@@ -159,6 +160,9 @@ function initializeSocket(server, db) {
             // console.log(`User ${socket.id} disconnected due to ${reason}`);
             for (let userId in userSockets) {
                 if (userSockets[userId] === socket.id) {
+                    const onlineUsers = Object.keys(userSockets);
+                    socket.emit("onlineUsers", onlineUsers);
+
                     delete userSockets[userId];
                     // console.log(`User ${userId} removed from userSockets`);
                     break;
