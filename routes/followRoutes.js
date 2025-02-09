@@ -1,6 +1,7 @@
 const express = require("express");
 const db = require("../db");
 const router = express.Router();
+const { emitUnreadNotificationCount, emitNotifications } = require("../utils/utils");
 
 // Follow user
 router.post("/", async (req, res) => {
@@ -44,6 +45,8 @@ router.post("/", async (req, res) => {
              VALUES (?, ?, 'follow_request', ?, ?, NOW())`,
             [followingId, followerId, "has sent you a follow request.", result.insertId]
         );
+
+        emitUnreadNotificationCount(followingId);
 
         res.status(201).json({
             success: true,

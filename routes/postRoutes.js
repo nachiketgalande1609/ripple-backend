@@ -255,9 +255,20 @@ router.post("/comment", (req, res) => {
 router.get(["/"], (req, res) => {
     const { userId } = req.params.userId ? req.params : req.query;
 
-    let postsQuery = "SELECT u.username, u.profile_picture, p.* FROM posts p INNER JOIN users u ON p.user_id = u.id ORDER BY p.created_at DESC;";
+    let postsQuery = `
+        SELECT u.username,
+            u.profile_picture,
+            p.*
+        FROM posts p
+        INNER JOIN users u
+            ON p.user_id = u.id
+        INNER JOIN followers f
+            ON p.user_id = f.following_id
+        WHERE f.follower_id = ?
+        ORDER BY p.created_at DESC;
+    `;
 
-    db.query(postsQuery, (err, result) => {
+    db.query(postsQuery, [userId], (err, result) => {
         if (err) {
             return res.status(500).json({
                 success: false,
