@@ -8,7 +8,7 @@ router.get("/:userId", (req, res) => {
     const query = `
         SELECT n.id, n.type, n.message, n.post_id, n.created_at,
                u.id AS sender_id, u.username, u.profile_picture,
-               p.image_url, fr.status AS request_status,
+               p.file_url, fr.status AS request_status,
                fr.follower_id AS requester_id, fr.id AS request_id
         FROM notifications n
         JOIN users u ON n.sender_id = u.id

@@ -39,7 +39,7 @@ router.get("/:currentUserId", (req, res) => {
             // Fetch all messages where the user is either sender or receiver
             db.query(
                 `
-            SELECT message_id ,sender_id, receiver_id, message_text, image_url, timestamp , delivered, delivered_timestamp, is_read, read_timestamp
+            SELECT message_id ,sender_id, receiver_id, message_text, file_url, timestamp , delivered, delivered_timestamp, is_read, read_timestamp, file_name, file_size
             FROM messages 
             WHERE sender_id = ? OR receiver_id = ?
             ORDER BY timestamp ASC;
@@ -67,12 +67,14 @@ router.get("/:currentUserId", (req, res) => {
                             message_id: msg.message_id,
                             sender_id: msg.sender_id,
                             message_text: msg.message_text,
-                            image_url: msg.image_url,
+                            file_url: msg.file_url,
                             timestamp: msg.timestamp,
                             delivered: msg.delivered,
                             read: msg.is_read,
                             delivered_timestamp: msg.delivered_timestamp,
                             read_timestamp: msg.read_timestamp,
+                            file_name: msg.file_name,
+                            file_size: msg.file_size,
                         });
                     });
 
@@ -98,9 +100,12 @@ router.post("/media", upload.single("image"), async (req, res) => {
         });
     }
 
+    const fileName = file.originalname;
+    const fileSize = file.size;
+
     const uploadParams = {
         Bucket: process.env.AWS_S3_BUCKET_NAME,
-        Key: `chat/${Date.now()}_${file.originalname}`,
+        Key: `chat/${Date.now()}_${fileName}`,
         Body: file.buffer,
         ContentType: file.mimetype,
         ACL: "public-read",
@@ -110,13 +115,15 @@ router.post("/media", upload.single("image"), async (req, res) => {
         const command = new PutObjectCommand(uploadParams);
         await s3.send(command);
 
-        const imageUrl = `https://${uploadParams.Bucket}.s3.${process.env.AWS_REGION}.amazonaws.com/${uploadParams.Key}`;
+        const fileUrl = `https://${uploadParams.Bucket}.s3.${process.env.AWS_REGION}.amazonaws.com/${uploadParams.Key}`;
 
         return res.status(200).json({
             success: true,
             error: null,
             data: {
-                imageUrl,
+                fileUrl,
+                fileName,
+                fileSize,
             },
         });
     } catch (error) {

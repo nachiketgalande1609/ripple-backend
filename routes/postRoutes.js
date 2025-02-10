@@ -585,11 +585,11 @@ router.post("/", upload.single("image"), async (req, res) => {
         const command = new PutObjectCommand(uploadParams);
         await s3.send(command);
 
-        const imageUrl = `https://${uploadParams.Bucket}.s3.${process.env.AWS_REGION}.amazonaws.com/${uploadParams.Key}`;
+        const fileUrl = `https://${uploadParams.Bucket}.s3.${process.env.AWS_REGION}.amazonaws.com/${uploadParams.Key}`;
 
         // Insert post into database
-        const query = "INSERT INTO posts (content, image_url, location, user_id) VALUES (?, ?, ?, ?)";
-        db.query(query, [content, imageUrl, location, user_id], (err, result) => {
+        const query = "INSERT INTO posts (content, file_url, location, user_id) VALUES (?, ?, ?, ?)";
+        db.query(query, [content, fileUrl, location, user_id], (err, result) => {
             if (err) {
                 return res.status(500).json({
                     success: false,
@@ -603,7 +603,7 @@ router.post("/", upload.single("image"), async (req, res) => {
                 error: null,
                 message: "Post created successfully",
                 postId: result.insertId,
-                imageUrl,
+                fileUrl,
             });
         });
     } catch (error) {

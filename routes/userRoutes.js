@@ -152,11 +152,11 @@ router.post("/profile/picture", upload.single("profile_pic"), async (req, res) =
         await s3.send(command);
 
         // Construct the image URL
-        const imageUrl = `https://${uploadParams.Bucket}.s3.${process.env.AWS_REGION}.amazonaws.com/${uploadParams.Key}`;
+        const fileUrl = `https://${uploadParams.Bucket}.s3.${process.env.AWS_REGION}.amazonaws.com/${uploadParams.Key}`;
 
         // Update the user's profile picture URL in the database
         const query = "UPDATE users SET profile_picture = ? WHERE id = ?";
-        db.query(query, [imageUrl, user_id], (err, result) => {
+        db.query(query, [fileUrl, user_id], (err, result) => {
             if (err) {
                 console.error("Database error:", err.message);
                 return res.status(500).json({
@@ -169,7 +169,7 @@ router.post("/profile/picture", upload.single("profile_pic"), async (req, res) =
             return res.status(200).json({
                 success: true,
                 message: "Profile picture updated successfully.",
-                imageUrl,
+                fileUrl,
             });
         });
     } catch (error) {

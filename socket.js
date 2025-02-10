@@ -56,7 +56,7 @@ function initializeSocket(server, db) {
 
         // Handle sending messages
         socket.on("sendMessage", (data) => {
-            const { senderId, receiverId, text, tempId, imageUrl } = data;
+            const { senderId, receiverId, text, tempId, fileUrl, fileName, fileSize } = data;
 
             const receiverSocketId = userSockets[receiverId];
             const senderSocketId = userSockets[senderId];
@@ -66,10 +66,10 @@ function initializeSocket(server, db) {
 
             db.query(
                 `
-                    INSERT INTO messages (sender_id, receiver_id, message_text, image_url, timestamp, delivered, delivered_timestamp) 
-                    VALUES (?, ?, ?, ?, NOW(), ?, ?);
+                    INSERT INTO messages (sender_id, receiver_id, message_text, file_url, file_name, file_size, timestamp, delivered, delivered_timestamp) 
+                    VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?);
                 `,
-                [senderId, receiverId, text, imageUrl, delivered, deliveredTimestamp],
+                [senderId, receiverId, text, fileUrl, fileName, fileSize, delivered, deliveredTimestamp],
                 (err, results) => {
                     if (err) {
                         console.error("Error saving message:", err.message);
@@ -99,7 +99,9 @@ function initializeSocket(server, db) {
                                     senderId,
                                     message_text: text,
                                     timestamp: new Date().toISOString(),
-                                    imageUrl,
+                                    fileUrl,
+                                    fileName,
+                                    fileSize,
                                 });
 
                                 io.to(senderSocketId).emit("messageDelivered", {
