@@ -61,12 +61,15 @@ function initializeSocket(server, db) {
             const receiverSocketId = userSockets[receiverId];
             const senderSocketId = userSockets[senderId];
 
+            const delivered = !!receiverSocketId;
+            const deliveredTimestamp = delivered ? new Date() : null;
+
             db.query(
                 `
                     INSERT INTO messages (sender_id, receiver_id, message_text, image_url, timestamp, delivered, delivered_timestamp) 
                     VALUES (?, ?, ?, ?, NOW(), ?, ?);
                 `,
-                [senderId, receiverId, text, imageUrl, !!receiverSocketId, receiverSocketId ? new Date() : null],
+                [senderId, receiverId, text, imageUrl, delivered, deliveredTimestamp],
                 (err, results) => {
                     if (err) {
                         console.error("Error saving message:", err.message);
@@ -99,10 +102,9 @@ function initializeSocket(server, db) {
                                     imageUrl,
                                 });
 
-                                console.log({ messageId, senderId, message_text: text, timestamp: new Date().toISOString(), imageUrl });
-
                                 io.to(senderSocketId).emit("messageDelivered", {
                                     messageId,
+                                    deliveredTimestamp: deliveredTimestamp ? deliveredTimestamp.toISOString() : null,
                                     timestamp: new Date().toISOString(),
                                 });
                             }
@@ -127,13 +129,24 @@ function initializeSocket(server, db) {
                     console.error("Error updating message status:", err.message);
                     return;
                 }
-                if (senderSocketId) {
-                    io.to(senderSocketId).emit("messageRead", {
-                        receiverId,
-                        messageIds,
-                        timestamp: new Date().toISOString(),
-                    });
-                }
+
+                // Fetch updated read timestamps from the database
+                db.query(`SELECT message_id, read_timestamp FROM messages WHERE message_id IN (?)`, [messageIds], (err, results) => {
+                    if (err) {
+                        console.error("Error fetching read timestamps:", err.message);
+                        return;
+                    }
+
+                    if (senderSocketId) {
+                        io.to(senderSocketId).emit("messageRead", {
+                            receiverId,
+                            messageIds: results.map((msg) => ({
+                                messageId: msg.message_id,
+                                readTimestamp: msg.read_timestamp.toISOString(),
+                            })),
+                        });
+                    }
+                });
             });
         });
 

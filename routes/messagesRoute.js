@@ -39,7 +39,7 @@ router.get("/:currentUserId", (req, res) => {
             // Fetch all messages where the user is either sender or receiver
             db.query(
                 `
-            SELECT message_id ,sender_id, receiver_id, message_text, image_url, timestamp , delivered, is_read
+            SELECT message_id ,sender_id, receiver_id, message_text, image_url, timestamp , delivered, delivered_timestamp, is_read, read_timestamp
             FROM messages 
             WHERE sender_id = ? OR receiver_id = ?
             ORDER BY timestamp ASC;
@@ -71,6 +71,8 @@ router.get("/:currentUserId", (req, res) => {
                             timestamp: msg.timestamp,
                             delivered: msg.delivered,
                             read: msg.is_read,
+                            delivered_timestamp: msg.delivered_timestamp,
+                            read_timestamp: msg.read_timestamp,
                         });
                     });
 
