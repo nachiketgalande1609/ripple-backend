@@ -1,7 +1,7 @@
 const { Server } = require("socket.io");
 
 let io;
-let userSockets = {}; // Store user ID -> socket ID mapping
+let userSockets = {};
 
 function initializeSocket(server, db) {
     io = new Server(server, {
@@ -9,48 +9,48 @@ function initializeSocket(server, db) {
             origin: "*",
             methods: ["GET", "POST"],
         },
-        pingInterval: 25000, // Default is 25000 (25 seconds)
-        pingTimeout: 60000, // Default is 60000 (60 seconds)
+        pingInterval: 25000,
+        pingTimeout: 60000,
     });
 
     io.on("connection", (socket) => {
-        // Store user socket mapping when a user connects
         socket.on("registerUser", (userId) => {
             if (userSockets[userId] !== socket.id) {
                 userSockets[userId] = socket.id;
 
-                const onlineUsers = Object.keys(userSockets); // Get the list of online user IDs
+                const onlineUsers = Object.keys(userSockets);
                 io.emit("onlineUsers", onlineUsers);
 
-                // Mark all unread messages as delivered for the user upon connection
-                db.query(`UPDATE messages SET delivered = TRUE WHERE receiver_id = ? AND delivered = FALSE`, [userId], (err) => {
-                    if (err) {
-                        console.error("Error marking messages as delivered:", err.message);
-                    } else {
-                        // Query for all unread messages for this user
-                        db.query(
-                            `SELECT * FROM messages WHERE receiver_id = ? AND delivered = TRUE AND is_read = FALSE`,
-                            [userId],
-                            (err, results) => {
-                                if (err) {
-                                    console.error("Error retrieving unread messages:", err.message);
-                                    return;
-                                }
-
-                                // For each unread message, emit a 'messageDelivered' event to the sender
-                                results.forEach((message) => {
-                                    const senderSocketId = userSockets[message.sender_id];
-                                    if (senderSocketId) {
-                                        io.to(senderSocketId).emit("messageDelivered", {
-                                            messageId: message.message_id,
-                                            timestamp: new Date().toISOString(),
-                                        });
+                db.query(
+                    `UPDATE messages SET delivered = TRUE, delivered_timestamp = NOW() WHERE receiver_id = ? AND delivered = FALSE`,
+                    [userId],
+                    (err) => {
+                        if (err) {
+                            console.error("Error marking messages as delivered:", err.message);
+                        } else {
+                            db.query(
+                                `SELECT * FROM messages WHERE receiver_id = ? AND delivered = TRUE AND is_read = FALSE`,
+                                [userId],
+                                (err, results) => {
+                                    if (err) {
+                                        console.error("Error retrieving unread messages:", err.message);
+                                        return;
                                     }
-                                });
-                            }
-                        );
+
+                                    results.forEach((message) => {
+                                        const senderSocketId = userSockets[message.sender_id];
+                                        if (senderSocketId) {
+                                            io.to(senderSocketId).emit("messageDelivered", {
+                                                messageId: message.message_id,
+                                                timestamp: new Date().toISOString(),
+                                            });
+                                        }
+                                    });
+                                }
+                            );
+                        }
                     }
-                });
+                );
             }
         });
 
@@ -58,17 +58,15 @@ function initializeSocket(server, db) {
         socket.on("sendMessage", (data) => {
             const { senderId, receiverId, text, tempId, imageUrl } = data;
 
-            console.log();
-
             const receiverSocketId = userSockets[receiverId];
             const senderSocketId = userSockets[senderId];
 
             db.query(
                 `
-                    INSERT INTO messages (sender_id, receiver_id, message_text, image_url, timestamp, delivered)
-                    VALUES (?, ?, ?, ?, NOW(), ?);
-                    `,
-                [senderId, receiverId, text, imageUrl, !!receiverSocketId],
+                    INSERT INTO messages (sender_id, receiver_id, message_text, image_url, timestamp, delivered, delivered_timestamp) 
+                    VALUES (?, ?, ?, ?, NOW(), ?, ?);
+                `,
+                [senderId, receiverId, text, imageUrl, !!receiverSocketId, receiverSocketId ? new Date() : null],
                 (err, results) => {
                     if (err) {
                         console.error("Error saving message:", err.message);
@@ -124,8 +122,7 @@ function initializeSocket(server, db) {
 
             const senderSocketId = userSockets[senderId];
 
-            // Update all messages in the database
-            db.query(`UPDATE messages SET is_read = TRUE WHERE message_id IN (?)`, [messageIds], (err) => {
+            db.query(`UPDATE messages SET is_read = TRUE, read_timestamp = NOW() WHERE message_id IN (?)`, [messageIds], (err) => {
                 if (err) {
                     console.error("Error updating message status:", err.message);
                     return;
