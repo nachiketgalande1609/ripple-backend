@@ -4,6 +4,7 @@ const db = require("../db");
 const multer = require("multer");
 const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
 const upload = multer({ storage: multer.memoryStorage() });
+const sharp = require("sharp");
 
 const s3 = new S3Client({
     region: process.env.AWS_REGION,
@@ -39,7 +40,7 @@ router.get("/:currentUserId", (req, res) => {
             // Fetch all messages where the user is either sender or receiver
             db.query(
                 `
-            SELECT message_id ,sender_id, receiver_id, message_text, file_url, timestamp , delivered, delivered_timestamp, is_read, read_timestamp, file_name, file_size, reply_to
+            SELECT message_id ,sender_id, receiver_id, message_text, file_url, timestamp , delivered, delivered_timestamp, is_read, read_timestamp, file_name, file_size, reply_to, image_width, image_height
             FROM messages 
             WHERE sender_id = ? OR receiver_id = ?
             ORDER BY timestamp ASC;
@@ -76,6 +77,8 @@ router.get("/:currentUserId", (req, res) => {
                             file_name: msg.file_name,
                             file_size: msg.file_size,
                             reply_to: msg.reply_to,
+                            image_width: msg.image_width,
+                            image_height: msg.image_height,
                         });
                     });
 
@@ -103,12 +106,31 @@ router.post("/media", upload.single("image"), async (req, res) => {
 
     const fileName = file.originalname;
     const fileSize = file.size;
+    const fileType = file.mimetype;
+    let imageWidth = null;
+    let imageHeight = null;
+
+    // Check if the file is an image and extract dimensions
+    if (fileType.startsWith("image/")) {
+        try {
+            const metadata = await sharp(file.buffer).metadata();
+            imageWidth = metadata.width;
+            imageHeight = metadata.height;
+        } catch (err) {
+            console.error("Error processing image:", err);
+            return res.status(500).json({
+                success: false,
+                error: "Failed to process image.",
+                data: null,
+            });
+        }
+    }
 
     const uploadParams = {
         Bucket: process.env.AWS_S3_BUCKET_NAME,
         Key: `chat/${Date.now()}_${fileName}`,
         Body: file.buffer,
-        ContentType: file.mimetype,
+        ContentType: fileType,
         ACL: "public-read",
     };
 
@@ -125,9 +147,13 @@ router.post("/media", upload.single("image"), async (req, res) => {
                 fileUrl,
                 fileName,
                 fileSize,
+                fileType,
+                imageWidth: imageWidth,
+                imageHeight: imageHeight,
             },
         });
     } catch (error) {
+        console.error("S3 Upload Error:", error);
         return res.status(500).json({
             success: false,
             error: "Failed to upload image to S3.",
