@@ -58,7 +58,7 @@ router.get("/history", (req, res) => {
     SELECT 
       sh.id AS history_id,
       sh.created_at,
-      u.id AS user_id,
+      u.id AS id,
       u.username,
       u.email,
       u.profile_picture
