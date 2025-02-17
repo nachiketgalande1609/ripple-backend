@@ -117,4 +117,30 @@ router.post("/response", async (req, res) => {
     }
 });
 
+router.get("/following/:userId", async (req, res) => {
+    try {
+        const { userId } = req.params;
+
+        const query = `
+            SELECT u.id, u.username, u.profile_picture
+            FROM followers f
+            JOIN users u ON f.following_id = u.id
+            WHERE f.follower_id = ?
+        `;
+
+        const [results] = await db.promise().query(query, [userId]);
+
+        res.status(200).json({
+            success: true,
+            data: results,
+        });
+    } catch (error) {
+        console.error("Error fetching following users:", error.message);
+        res.status(500).json({
+            success: false,
+            error: "Internal server error",
+        });
+    }
+});
+
 module.exports = router;
