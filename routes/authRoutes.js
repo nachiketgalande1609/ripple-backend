@@ -27,7 +27,7 @@ router.post("/register", async (req, res) => {
             if (existingUser.email === email) {
                 return res.status(400).json({
                     success: false,
-                    error: "User with the same email already exist.",
+                    error: "User with the same email already exists.",
                     data: null,
                 });
             }
@@ -41,7 +41,7 @@ router.post("/register", async (req, res) => {
         }
 
         const insertQuery = "INSERT INTO users (username, email, password) VALUES (?, ?, ?)";
-        db.query(insertQuery, [username, email, hashedPassword], (err, result) => {
+        db.query(insertQuery, [username, email, hashedPassword], async (err, result) => {
             if (err) {
                 return res.status(500).json({
                     success: false,
@@ -49,11 +49,22 @@ router.post("/register", async (req, res) => {
                     data: null,
                 });
             }
+
+            // Create a JWT token after registration
+            const user = { id: result.insertId, username, email }; // Adjust this as needed
+            const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, { expiresIn: "1h" });
+
             res.status(201).json({
                 success: true,
                 error: null,
                 data: {
                     message: "User registered successfully",
+                    token,
+                    user: {
+                        id: user.id,
+                        username: user.username,
+                        email: user.email,
+                    },
                 },
             });
         });
