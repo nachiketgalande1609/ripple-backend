@@ -262,13 +262,13 @@ router.get(["/"], (req, res) => {
         FROM posts p
         INNER JOIN users u
             ON p.user_id = u.id
-        INNER JOIN followers f
+        LEFT JOIN followers f
             ON p.user_id = f.following_id
-        WHERE f.follower_id = ?
+        WHERE f.follower_id = ? OR p.user_id = ?
         ORDER BY p.created_at DESC;
     `;
 
-    db.query(postsQuery, [userId], (err, result) => {
+    db.query(postsQuery, [userId, userId], (err, result) => {
         if (err) {
             return res.status(500).json({
                 success: false,
