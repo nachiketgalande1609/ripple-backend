@@ -62,6 +62,47 @@ router.post("/", async (req, res) => {
     }
 });
 
+router.delete("/unfollow", async (req, res) => {
+    const { followerId, followingId } = req.body;
+
+    if (!followerId || !followingId) {
+        return res.status(400).json({
+            success: false,
+            error: "Missing required fields",
+            data: null,
+        });
+    }
+
+    try {
+        // Delete the follow relationship from the followers table
+        const [result] = await db.promise().query(
+            `DELETE FROM followers 
+             WHERE follower_id = ? AND following_id = ?`,
+            [followerId, followingId]
+        );
+
+        if (result.affectedRows === 0) {
+            return res.status(404).json({
+                success: false,
+                error: "Follow relationship not found",
+                data: null,
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            error: null,
+            data: { message: "Unfollowed successfully" },
+        });
+    } catch (err) {
+        res.status(500).json({
+            success: false,
+            error: err.message,
+            data: null,
+        });
+    }
+});
+
 // Respond to follow request
 router.post("/response", async (req, res) => {
     const { requestId, status } = req.body;
