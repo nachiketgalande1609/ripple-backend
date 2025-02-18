@@ -6,6 +6,7 @@ const { createNotification } = require("../utils/utils");
 const multer = require("multer");
 const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
 const { emitUnreadNotificationCount, emitNotifications } = require("../utils/utils");
+const sharp = require("sharp");
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -251,19 +252,101 @@ router.post("/comment", (req, res) => {
     });
 });
 
+// Save Post
+router.post("/save", (req, res) => {
+    const { userId, postId } = req.body;
+
+    // Validate the input
+    if (!userId || !postId) {
+        return res.status(400).json({
+            success: false,
+            error: "userId and postId are required.",
+            data: null,
+        });
+    }
+
+    // Check if the post is already saved in the saved_posts table for this user
+    const checkSavedPostQuery = `
+        SELECT 1 FROM saved_posts WHERE user_id = ? AND post_id = ?
+    `;
+
+    db.query(checkSavedPostQuery, [userId, postId], (err, result) => {
+        if (err) {
+            return res.status(500).json({
+                success: false,
+                error: err.message,
+                data: null,
+            });
+        }
+
+        if (result.length > 0) {
+            // If the post is already saved, remove it (toggle action)
+            const deleteSavedPostQuery = `
+                DELETE FROM saved_posts WHERE user_id = ? AND post_id = ?
+            `;
+
+            db.query(deleteSavedPostQuery, [userId, postId], (err, result) => {
+                if (err) {
+                    return res.status(500).json({
+                        success: false,
+                        error: err.message,
+                        data: null,
+                    });
+                }
+
+                res.status(200).json({
+                    success: true,
+                    error: null,
+                    data: {
+                        message: "Post removed from saved posts",
+                        postId,
+                    },
+                });
+            });
+        } else {
+            // If the post is not saved, save it (toggle action)
+            const insertSavedPostQuery = `
+                INSERT INTO saved_posts (user_id, post_id) VALUES (?, ?)
+            `;
+
+            db.query(insertSavedPostQuery, [userId, postId], (err, result) => {
+                if (err) {
+                    return res.status(500).json({
+                        success: false,
+                        error: err.message,
+                        data: null,
+                    });
+                }
+
+                res.status(200).json({
+                    success: true,
+                    error: null,
+                    data: {
+                        message: "Post saved successfully",
+                        postId,
+                    },
+                });
+            });
+        }
+    });
+});
+
 // Fetch Home Page Posts
-router.get(["/"], (req, res) => {
+router.get("/", (req, res) => {
     const { userId } = req.params.userId ? req.params : req.query;
 
     let postsQuery = `
         SELECT u.username,
             u.profile_picture,
-            p.*
+            p.*,
+            IF(sp.user_id IS NOT NULL, 1, 0) AS saved_by_current_user
         FROM posts p
         INNER JOIN users u
             ON p.user_id = u.id
         LEFT JOIN followers f
             ON p.user_id = f.following_id
+        LEFT JOIN saved_posts sp
+            ON p.id = sp.post_id AND sp.user_id = p.user_id
         WHERE f.follower_id = ? OR p.user_id = ?
         ORDER BY p.created_at DESC;
     `;
@@ -573,11 +656,32 @@ router.post("/", upload.single("image"), async (req, res) => {
         });
     }
 
+    const fileName = file.originalname;
+    const fileType = file.mimetype;
+    let imageWidth = null;
+    let imageHeight = null;
+
+    // Extract image dimensions if the file is an image
+    if (fileType.startsWith("image/")) {
+        try {
+            const metadata = await sharp(file.buffer).metadata();
+            imageWidth = metadata.width;
+            imageHeight = metadata.height;
+        } catch (err) {
+            console.error("Error processing image:", err);
+            return res.status(500).json({
+                success: false,
+                error: "Failed to process image.",
+                data: null,
+            });
+        }
+    }
+
     const uploadParams = {
         Bucket: process.env.AWS_S3_BUCKET_NAME,
-        Key: `uploads/${Date.now()}_${file.originalname}`,
+        Key: `uploads/${Date.now()}_${fileName}`,
         Body: file.buffer,
-        ContentType: file.mimetype,
+        ContentType: fileType,
         ACL: "public-read",
     };
 
@@ -587,9 +691,12 @@ router.post("/", upload.single("image"), async (req, res) => {
 
         const fileUrl = `https://${uploadParams.Bucket}.s3.${process.env.AWS_REGION}.amazonaws.com/${uploadParams.Key}`;
 
-        // Insert post into database
-        const query = "INSERT INTO posts (content, file_url, location, user_id) VALUES (?, ?, ?, ?)";
-        db.query(query, [content, fileUrl, location, user_id], (err, result) => {
+        // Insert post into database with image dimensions
+        const query = `
+            INSERT INTO posts (content, file_url, location, user_id, image_width, image_height)
+            VALUES (?, ?, ?, ?, ?, ?)
+        `;
+        db.query(query, [content, fileUrl, location, user_id, imageWidth, imageHeight], (err, result) => {
             if (err) {
                 return res.status(500).json({
                     success: false,
@@ -604,12 +711,15 @@ router.post("/", upload.single("image"), async (req, res) => {
                 message: "Post created successfully",
                 postId: result.insertId,
                 fileUrl,
+                imageWidth,
+                imageHeight,
             });
         });
     } catch (error) {
+        console.error("S3 Upload Error:", error);
         res.status(500).json({
             success: false,
-            error: error.message,
+            error: "Failed to upload image to S3.",
             data: null,
         });
     }
@@ -719,6 +829,151 @@ router.delete("/", (req, res) => {
                 message: "Post deleted successfully",
                 data: null,
             });
+        });
+    });
+});
+
+// Fetch Saved Posts
+router.get(["/saved"], (req, res) => {
+    const { userId } = req.params.userId ? req.params : req.query;
+
+    let savedPostsQuery = `
+        SELECT u.username,
+            u.profile_picture,
+            p.*
+        FROM posts p
+        INNER JOIN users u
+            ON p.user_id = u.id
+        INNER JOIN saved_posts sp
+            ON p.id = sp.post_id
+        WHERE sp.user_id = ?
+        ORDER BY p.created_at DESC;
+    `;
+
+    db.query(savedPostsQuery, [userId], (err, result) => {
+        if (err) {
+            return res.status(500).json({
+                success: false,
+                error: err.message,
+                data: null,
+            });
+        }
+
+        // Fetch like counts for each post
+        const postIds = result.map((post) => post.id);
+
+        if (postIds.length === 0) {
+            return res.status(200).json({
+                success: true,
+                error: null,
+                data: result,
+            });
+        }
+
+        let likesQuery = `SELECT post_id, COUNT(*) AS like_count FROM likes WHERE post_id IN (?) GROUP BY post_id;`;
+
+        db.query(likesQuery, [postIds], (err, likesResult) => {
+            if (err) {
+                return res.status(500).json({
+                    success: false,
+                    error: err.message,
+                    data: null,
+                });
+            }
+
+            // Create a map of post_id to like_count
+            const likeCounts = likesResult.reduce((acc, like) => {
+                acc[like.post_id] = like.like_count;
+                return acc;
+            }, {});
+
+            // If userId is provided, fetch liked posts by the current user
+            if (userId) {
+                let likedPostsQuery = `
+                    SELECT post_id
+                    FROM likes
+                    WHERE user_id = ?
+                    AND post_id IN (?);
+                `;
+
+                db.query(likedPostsQuery, [userId, postIds], (err, likedPostsResult) => {
+                    if (err) {
+                        return res.status(500).json({
+                            success: false,
+                            error: err.message,
+                            data: null,
+                        });
+                    }
+
+                    // Create a set of post_ids that the user has liked
+                    const likedPostsByCurrentUser = new Set(likedPostsResult.map((like) => like.post_id));
+
+                    // Add like count and like status to posts
+                    result.forEach((post) => {
+                        const createdAt = new Date(post.created_at);
+                        post.timeAgo = getTimeAgo(createdAt);
+
+                        // Set the like count
+                        post.like_count = likeCounts[post.id] || 0;
+
+                        // If userId is provided, check if the current user liked the post
+                        post.liked_by_current_user = likedPostsByCurrentUser.has(post.id) ? 1 : 0;
+                    });
+
+                    // Fetch comments for each post
+                    let commentsQuery = `
+                        SELECT c.id, c.post_id, c.user_id, c.content, c.parent_comment_id, c.created_at, c.updated_at, 
+                               u.username AS commenter_username, u.profile_picture AS commenter_profile_picture
+                        FROM comments c
+                        INNER JOIN users u ON c.user_id = u.id
+                        WHERE c.post_id IN (?)
+                        ORDER BY c.created_at DESC;
+                    `;
+
+                    db.query(commentsQuery, [postIds], (err, commentsResult) => {
+                        if (err) {
+                            return res.status(500).json({
+                                success: false,
+                                error: err.message,
+                                data: null,
+                            });
+                        }
+
+                        // Organize comments by post_id and set timeAgo for each comment
+                        const commentsByPostId = commentsResult.reduce((acc, comment) => {
+                            if (!acc[comment.post_id]) {
+                                acc[comment.post_id] = [];
+                            }
+                            comment.timeAgo = getTimeAgo(new Date(comment.created_at)); // Set timeAgo for comment
+                            acc[comment.post_id].push(comment);
+                            return acc;
+                        }, {});
+
+                        // Add comment count and comments to posts
+                        result.forEach((post) => {
+                            post.comment_count = commentsByPostId[post.id] ? commentsByPostId[post.id].length : 0; // Add comment count
+                            post.comments = commentsByPostId[post.id] || []; // Add comments
+                        });
+
+                        res.status(200).json({
+                            success: true,
+                            error: null,
+                            data: result,
+                        });
+                    });
+                });
+            } else {
+                // If no userId is provided, simply return the posts with like counts
+                result.forEach((post) => {
+                    post.like_count = likeCounts[post.id] || 0;
+                });
+
+                res.status(200).json({
+                    success: true,
+                    error: null,
+                    data: result,
+                });
+            }
         });
     });
 });
