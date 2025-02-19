@@ -6,6 +6,16 @@ const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
 const upload = multer({ storage: multer.memoryStorage() });
 const sharp = require("sharp");
 
+const fs = require("fs");
+const path = require("path");
+const os = require("os");
+const ffmpeg = require("fluent-ffmpeg");
+const ffmpegPath = require("@ffmpeg-installer/ffmpeg").path;
+const ffprobePath = require("@ffprobe-installer/ffprobe").path;
+
+ffmpeg.setFfmpegPath(ffmpegPath);
+ffmpeg.setFfprobePath(ffprobePath);
+
 const s3 = new S3Client({
     region: process.env.AWS_REGION,
     credentials: {
@@ -110,20 +120,39 @@ router.post("/media", upload.single("image"), async (req, res) => {
     let mediaWidth = null;
     let mediaHeight = null;
 
-    // Check if the file is an image and extract dimensions
-    if (fileType.startsWith("image/")) {
-        try {
+    try {
+        if (fileType.startsWith("image/")) {
             const metadata = await sharp(file.buffer).metadata();
             mediaWidth = metadata.width;
             mediaHeight = metadata.height;
-        } catch (err) {
-            console.error("Error processing image:", err);
-            return res.status(500).json({
-                success: false,
-                error: "Failed to process image.",
-                data: null,
+        } else if (fileType.startsWith("video/")) {
+            // Write buffer to a temp file
+            const tempFilePath = path.join(os.tmpdir(), `${Date.now()}_${fileName}`);
+            fs.writeFileSync(tempFilePath, file.buffer);
+
+            await new Promise((resolve, reject) => {
+                ffmpeg.ffprobe(tempFilePath, (err, metadata) => {
+                    if (err) {
+                        console.error("Error processing video:", err);
+                        reject(err);
+                    } else {
+                        mediaWidth = metadata.streams[0]?.width || null;
+                        mediaHeight = metadata.streams[0]?.height || null;
+                        resolve();
+                    }
+                });
             });
+
+            // Delete the temporary file after processing
+            fs.unlinkSync(tempFilePath);
         }
+    } catch (err) {
+        console.error("Error processing media:", err);
+        return res.status(500).json({
+            success: false,
+            error: "Failed to process media.",
+            data: null,
+        });
     }
 
     const uploadParams = {
@@ -148,15 +177,15 @@ router.post("/media", upload.single("image"), async (req, res) => {
                 fileName,
                 fileSize,
                 fileType,
-                mediaWidth: mediaWidth,
-                mediaHeight: mediaHeight,
+                mediaWidth,
+                mediaHeight,
             },
         });
     } catch (error) {
         console.error("S3 Upload Error:", error);
         return res.status(500).json({
             success: false,
-            error: "Failed to upload image to S3.",
+            error: "Failed to upload media to S3.",
             data: null,
         });
     }
