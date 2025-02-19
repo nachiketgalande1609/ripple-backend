@@ -40,7 +40,7 @@ router.get("/:currentUserId", (req, res) => {
             // Fetch all messages where the user is either sender or receiver
             db.query(
                 `
-            SELECT message_id ,sender_id, receiver_id, message_text, file_url, timestamp , delivered, delivered_timestamp, is_read, read_timestamp, file_name, file_size, reply_to, image_width, image_height
+            SELECT message_id ,sender_id, receiver_id, message_text, file_url, timestamp , delivered, delivered_timestamp, is_read, read_timestamp, file_name, file_size, reply_to, media_width, media_height
             FROM messages 
             WHERE sender_id = ? OR receiver_id = ?
             ORDER BY timestamp ASC;
@@ -77,8 +77,8 @@ router.get("/:currentUserId", (req, res) => {
                             file_name: msg.file_name,
                             file_size: msg.file_size,
                             reply_to: msg.reply_to,
-                            image_width: msg.image_width,
-                            image_height: msg.image_height,
+                            media_width: msg.media_width,
+                            media_height: msg.media_height,
                         });
                     });
 
@@ -107,15 +107,15 @@ router.post("/media", upload.single("image"), async (req, res) => {
     const fileName = file.originalname;
     const fileSize = file.size;
     const fileType = file.mimetype;
-    let imageWidth = null;
-    let imageHeight = null;
+    let mediaWidth = null;
+    let mediaHeight = null;
 
     // Check if the file is an image and extract dimensions
     if (fileType.startsWith("image/")) {
         try {
             const metadata = await sharp(file.buffer).metadata();
-            imageWidth = metadata.width;
-            imageHeight = metadata.height;
+            mediaWidth = metadata.width;
+            mediaHeight = metadata.height;
         } catch (err) {
             console.error("Error processing image:", err);
             return res.status(500).json({
@@ -148,8 +148,8 @@ router.post("/media", upload.single("image"), async (req, res) => {
                 fileName,
                 fileSize,
                 fileType,
-                imageWidth: imageWidth,
-                imageHeight: imageHeight,
+                mediaWidth: mediaWidth,
+                mediaHeight: mediaHeight,
             },
         });
     } catch (error) {

@@ -56,7 +56,7 @@ function initializeSocket(server, db) {
 
         // Handle sending messages
         socket.on("sendMessage", (data) => {
-            const { senderId, receiverId, text, tempId, fileUrl, fileName, fileSize, replyTo, imageWidth, imageHeight } = data;
+            const { senderId, receiverId, text, tempId, fileUrl, fileName, fileSize, replyTo, mediaWidth, mediaHeight } = data;
 
             const receiverSocketId = userSockets[receiverId];
             const senderSocketId = userSockets[senderId];
@@ -66,10 +66,10 @@ function initializeSocket(server, db) {
 
             db.query(
                 `
-                    INSERT INTO messages (sender_id, receiver_id, message_text, file_url, file_name, file_size, timestamp, delivered, delivered_timestamp, reply_to, image_width, image_height) 
+                    INSERT INTO messages (sender_id, receiver_id, message_text, file_url, file_name, file_size, timestamp, delivered, delivered_timestamp, reply_to, media_width, media_height) 
                     VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?);
                 `,
-                [senderId, receiverId, text, fileUrl, fileName, fileSize, delivered, deliveredTimestamp, replyTo, imageWidth, imageHeight],
+                [senderId, receiverId, text, fileUrl, fileName, fileSize, delivered, deliveredTimestamp, replyTo, mediaWidth, mediaHeight],
                 (err, results) => {
                     if (err) {
                         console.error("Error saving message:", err.message);
@@ -103,8 +103,8 @@ function initializeSocket(server, db) {
                                     fileName,
                                     fileSize,
                                     replyTo,
-                                    imageWidth,
-                                    imageHeight,
+                                    mediaWidth,
+                                    mediaHeight,
                                 });
 
                                 io.to(senderSocketId).emit("messageDelivered", {

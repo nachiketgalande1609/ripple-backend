@@ -658,15 +658,15 @@ router.post("/", upload.single("image"), async (req, res) => {
 
     const fileName = file.originalname;
     const fileType = file.mimetype;
-    let imageWidth = null;
-    let imageHeight = null;
+    let mediaWidth = null;
+    let mediaHeight = null;
 
     // Extract image dimensions if the file is an image
     if (fileType.startsWith("image/")) {
         try {
             const metadata = await sharp(file.buffer).metadata();
-            imageWidth = metadata.width;
-            imageHeight = metadata.height;
+            mediaWidth = metadata.width;
+            mediaHeight = metadata.height;
         } catch (err) {
             console.error("Error processing image:", err);
             return res.status(500).json({
@@ -693,10 +693,10 @@ router.post("/", upload.single("image"), async (req, res) => {
 
         // Insert post into database with image dimensions
         const query = `
-            INSERT INTO posts (content, file_url, location, user_id, image_width, image_height)
+            INSERT INTO posts (content, file_url, location, user_id, media_width, media_height)
             VALUES (?, ?, ?, ?, ?, ?)
         `;
-        db.query(query, [content, fileUrl, location, user_id, imageWidth, imageHeight], (err, result) => {
+        db.query(query, [content, fileUrl, location, user_id, mediaWidth, mediaHeight], (err, result) => {
             if (err) {
                 return res.status(500).json({
                     success: false,
@@ -711,8 +711,8 @@ router.post("/", upload.single("image"), async (req, res) => {
                 message: "Post created successfully",
                 postId: result.insertId,
                 fileUrl,
-                imageWidth,
-                imageHeight,
+                mediaWidth,
+                mediaHeight,
             });
         });
     } catch (error) {
