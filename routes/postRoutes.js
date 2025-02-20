@@ -252,6 +252,64 @@ router.post("/comment", (req, res) => {
     });
 });
 
+// Delete Comment
+router.delete("/comment", (req, res) => {
+    const { userId, commentId } = req.body;
+
+    if (!userId || !commentId) {
+        return res.status(400).json({
+            success: false,
+            error: "User ID and Comment ID are required.",
+            data: null,
+        });
+    }
+
+    const getCommentQuery = "SELECT user_id FROM comments WHERE id = ?";
+    db.query(getCommentQuery, [commentId], (err, commentResult) => {
+        if (err) {
+            return res.status(500).json({
+                success: false,
+                error: err.message,
+                data: null,
+            });
+        }
+
+        if (commentResult.length === 0) {
+            return res.status(404).json({
+                success: false,
+                error: "Comment not found.",
+                data: null,
+            });
+        }
+
+        const commentOwnerId = commentResult[0].user_id;
+        if (commentOwnerId !== userId) {
+            return res.status(403).json({
+                success: false,
+                error: "You are not authorized to delete this comment.",
+                data: null,
+            });
+        }
+
+        const deleteCommentQuery = "DELETE FROM comments WHERE id = ?";
+        db.query(deleteCommentQuery, [commentId], (err, result) => {
+            if (err) {
+                return res.status(500).json({
+                    success: false,
+                    error: err.message,
+                    data: null,
+                });
+            }
+
+            return res.status(200).json({
+                success: true,
+                error: null,
+                data: "Comment deleted successfully.",
+            });
+        });
+    });
+});
+
 // Save Post
 router.post("/save", (req, res) => {
     const { userId, postId } = req.body;
