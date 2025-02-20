@@ -177,49 +177,56 @@ function initializeSocket(server, db) {
         socket.on("send-reaction", (data) => {
             const { messageId, senderUserId, reaction } = data;
 
-            if (!messageId || !senderUserId || !reaction) {
+            if (!messageId || !senderUserId) {
                 console.error("Invalid reaction data.");
                 return;
             }
 
-            db.query(
-                `UPDATE messages 
-                SET reactions = JSON_SET(COALESCE(reactions, '{}'), CONCAT('$."', ? , '"'), ?) 
-                WHERE message_id = ?`,
-                [senderUserId, reaction, messageId],
-                (err) => {
+            let query;
+            let queryParams;
+
+            if (reaction === null) {
+                // Remove the reaction if reaction is null
+                query = `UPDATE messages 
+                 SET reactions = JSON_REMOVE(reactions, CONCAT('$."', ? , '"')) 
+                 WHERE message_id = ?`;
+                queryParams = [senderUserId, messageId];
+            } else {
+                // Add or update reaction
+                query = `UPDATE messages 
+                 SET reactions = JSON_SET(COALESCE(reactions, '{}'), CONCAT('$."', ? , '"'), ?) 
+                 WHERE message_id = ?`;
+                queryParams = [senderUserId, reaction, messageId];
+            }
+
+            db.query(query, queryParams, (err) => {
+                if (err) {
+                    console.error("Error updating reactions:", err.message);
+                    return;
+                }
+
+                // Fetch updated message to determine receiver
+                db.query(`SELECT receiver_id, sender_id FROM messages WHERE message_id = ?`, [messageId], (err, results) => {
                     if (err) {
-                        console.error("Error updating reactions:", err.message);
+                        console.error("Error fetching message data:", err.message);
                         return;
                     }
 
-                    // Fetch the updated message to get receiverId
-                    db.query(`SELECT receiver_id, sender_id FROM messages WHERE message_id = ?`, [messageId], (err, results) => {
-                        if (err) {
-                            console.error("Error fetching message data:", err.message);
-                            return;
+                    if (results.length > 0) {
+                        const { receiver_id, sender_id } = results[0];
+                        const targetUserId = senderUserId === sender_id ? receiver_id : sender_id;
+                        const receiverSocketId = userSockets[targetUserId];
+
+                        if (receiverSocketId) {
+                            io.to(receiverSocketId).emit("reaction-received", {
+                                messageId,
+                                senderUserId,
+                                reaction,
+                            });
                         }
-
-                        if (results.length > 0) {
-                            const { receiver_id, sender_id } = results[0];
-
-                            // Determine the other user (receiver)
-                            const targetUserId = senderUserId === sender_id ? receiver_id : sender_id;
-
-                            // Get the socket ID of the receiver
-                            const receiverSocketId = userSockets[targetUserId];
-
-                            if (receiverSocketId) {
-                                io.to(receiverSocketId).emit("reaction-received", {
-                                    messageId,
-                                    senderUserId,
-                                    reaction,
-                                });
-                            }
-                        }
-                    });
-                }
-            );
+                    }
+                });
+            });
         });
 
         // Handle disconnect event and clean up the mapping
