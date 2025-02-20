@@ -30,6 +30,7 @@ const followRoutes = require("./routes/followRoutes");
 const searchRoutes = require("./routes/searchRoute");
 const settingsRoutes = require("./routes/settingsRoutes");
 const messagesRoutes = require("./routes/messagesRoute");
+const storiesRoutes = require("./routes/storiesRoutes");
 
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
@@ -39,6 +40,7 @@ app.use("/api/notifications", notificationRoutes);
 app.use("/api/search", searchRoutes);
 app.use("/api/settings", settingsRoutes);
 app.use("/api/messages", messagesRoutes);
+app.use("/api/stories", storiesRoutes);
 
 // MySQL connection
 const db = mysql.createConnection({
