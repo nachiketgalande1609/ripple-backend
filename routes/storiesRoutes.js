@@ -34,13 +34,24 @@ router.get("/", async (req, res) => {
             SELECT 
                 s.id AS story_id, s.caption, s.media_url, s.media_type, 
                 s.media_width, s.media_height, s.created_at, 
-                u.id AS user_id, u.username, u.profile_picture
+                u.id AS user_id, u.username, u.profile_picture,
+                JSON_ARRAYAGG(
+                    JSON_OBJECT(
+                        'view_id', v.id,
+                        'viewer_id', v.user_id,
+                        'viewer_username', viewer.username,
+                        'viewed_at', v.viewed_at
+                    )
+                ) AS viewers
             FROM stories s
             JOIN users u ON s.user_id = u.id
             LEFT JOIN followers f ON s.user_id = f.following_id
+            LEFT JOIN story_views v ON s.id = v.story_id  -- Join with story_views table
+            LEFT JOIN users viewer ON v.user_id = viewer.id  -- Get the viewer's username
             WHERE (f.follower_id = ? OR s.user_id = ?)  -- Added check for user's own stories
               AND s.is_active = 1
               AND (s.expires_at IS NULL OR s.expires_at > NOW())
+            GROUP BY s.id, u.id  -- Group by story and user to get all viewers for each story
             ORDER BY s.created_at DESC
         `;
 
@@ -52,6 +63,13 @@ router.get("/", async (req, res) => {
                     data: null,
                 });
             }
+
+            // Ensure viewers are parsed properly
+            results.forEach((story) => {
+                if (story.viewers && typeof story.viewers === "string") {
+                    story.viewers = JSON.parse(story.viewers); // Only parse if it's a string
+                }
+            });
 
             return res.status(200).json({
                 success: true,
