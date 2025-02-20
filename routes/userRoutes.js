@@ -82,42 +82,6 @@ router.get("/profile/:userId", async (req, res) => {
     }
 });
 
-router.get("/chat/:userId", (req, res) => {
-    const { userId } = req.params;
-
-    const userQuery = "SELECT id, username, profile_picture FROM users WHERE id = ?";
-
-    db.query(userQuery, [userId], (err, userResults) => {
-        if (err) {
-            return res.status(500).json({
-                success: false,
-                error: err.message,
-                data: null,
-            });
-        }
-
-        if (userResults.length === 0) {
-            return res.status(404).json({
-                success: false,
-                error: "User not found",
-                data: null,
-            });
-        }
-
-        const user = userResults[0];
-
-        res.status(200).json({
-            success: true,
-            error: null,
-            data: {
-                id: user.id,
-                username: user.username,
-                profile_picture: user.profile_picture,
-            },
-        });
-    });
-});
-
 router.post("/profile/picture", upload.single("profile_pic"), async (req, res) => {
     const { user_id } = req.body;
     const file = req.file;
