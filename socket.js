@@ -174,6 +174,54 @@ function initializeSocket(server, db) {
             }
         });
 
+        socket.on("send-reaction", (data) => {
+            const { messageId, senderUserId, reaction } = data;
+
+            if (!messageId || !senderUserId || !reaction) {
+                console.error("Invalid reaction data.");
+                return;
+            }
+
+            db.query(
+                `UPDATE messages 
+                SET reactions = JSON_SET(COALESCE(reactions, '{}'), CONCAT('$."', ? , '"'), ?) 
+                WHERE message_id = ?`,
+                [senderUserId, reaction, messageId],
+                (err) => {
+                    if (err) {
+                        console.error("Error updating reactions:", err.message);
+                        return;
+                    }
+
+                    // Fetch the updated message to get receiverId
+                    db.query(`SELECT receiver_id, sender_id FROM messages WHERE message_id = ?`, [messageId], (err, results) => {
+                        if (err) {
+                            console.error("Error fetching message data:", err.message);
+                            return;
+                        }
+
+                        if (results.length > 0) {
+                            const { receiver_id, sender_id } = results[0];
+
+                            // Determine the other user (receiver)
+                            const targetUserId = senderUserId === sender_id ? receiver_id : sender_id;
+
+                            // Get the socket ID of the receiver
+                            const receiverSocketId = userSockets[targetUserId];
+
+                            if (receiverSocketId) {
+                                io.to(receiverSocketId).emit("reaction-received", {
+                                    messageId,
+                                    senderUserId,
+                                    reaction,
+                                });
+                            }
+                        }
+                    });
+                }
+            );
+        });
+
         // Handle disconnect event and clean up the mapping
         socket.on("disconnect", (reason) => {
             // console.log(`User ${socket.id} disconnected due to ${reason}`);
