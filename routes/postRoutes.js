@@ -595,112 +595,6 @@ router.post(["/:userId"], (req, res) => {
     });
 });
 
-function fetchPosts(userId, currentUserId, res) {
-    let postsQuery = `
-        SELECT u.username, u.profile_picture, p.* 
-        FROM posts p 
-        INNER JOIN users u ON p.user_id = u.id 
-        WHERE p.user_id = ? 
-        ORDER BY p.created_at DESC;
-    `;
-
-    db.query(postsQuery, [userId], (err, result) => {
-        if (err) {
-            return res.status(500).json({
-                success: false,
-                error: err.message,
-                data: null,
-            });
-        }
-
-        if (result.length === 0) {
-            return res.status(200).json({
-                success: true,
-                error: null,
-                data: [],
-            });
-        }
-
-        const postIds = result.map((post) => post.id);
-
-        let likesQuery = `
-            SELECT post_id, user_id
-            FROM likes
-            WHERE post_id IN (?);
-        `;
-
-        db.query(likesQuery, [postIds], (err, likesResult) => {
-            if (err) {
-                return res.status(500).json({
-                    success: false,
-                    error: err.message,
-                    data: null,
-                });
-            }
-
-            const likeCounts = likesResult.reduce((acc, like) => {
-                acc[like.post_id] = (acc[like.post_id] || 0) + 1;
-                return acc;
-            }, {});
-
-            const likedPostsByCurrentUser = new Set(likesResult.map((like) => like.post_id));
-
-            result.forEach((post) => {
-                const createdAt = new Date(post.created_at);
-                post.timeAgo = getTimeAgo(createdAt);
-                post.like_count = likeCounts[post.id] || 0;
-                post.liked_by_current_user = likedPostsByCurrentUser.has(post.id) ? 1 : 0;
-            });
-
-            if (postIds.length === 0) {
-                return res.status(200).json({
-                    success: true,
-                    error: null,
-                    data: result,
-                });
-            }
-
-            let commentsQuery = `
-                SELECT c.id, c.post_id, c.user_id, c.content, c.parent_comment_id, c.created_at, c.updated_at, u.username AS commenter_username, u.profile_picture AS commenter_profile_picture
-                FROM comments c
-                INNER JOIN users u ON c.user_id = u.id
-                WHERE c.post_id IN (?)
-                ORDER BY c.created_at DESC;
-            `;
-
-            db.query(commentsQuery, [postIds], (err, commentsResult) => {
-                if (err) {
-                    return res.status(500).json({
-                        success: false,
-                        error: err.message,
-                        data: null,
-                    });
-                }
-
-                const commentsByPostId = commentsResult.reduce((acc, comment) => {
-                    if (!acc[comment.post_id]) {
-                        acc[comment.post_id] = [];
-                    }
-                    comment.timeAgo = getTimeAgo(new Date(comment.created_at));
-                    acc[comment.post_id].push(comment);
-                    return acc;
-                }, {});
-
-                result.forEach((post) => {
-                    post.comment_count = commentsByPostId[post.id] ? commentsByPostId[post.id].length : 0;
-                    post.comments = commentsByPostId[post.id] || [];
-                });
-
-                res.status(200).json({
-                    success: true,
-                    error: null,
-                    data: result,
-                });
-            });
-        });
-    });
-}
-
 // Create Post
 router.post("/", upload.single("image"), async (req, res) => {
     const { content, location, user_id } = req.body;
@@ -1035,5 +929,111 @@ router.get(["/saved"], (req, res) => {
         });
     });
 });
+
+function fetchPosts(userId, currentUserId, res) {
+    let postsQuery = `
+        SELECT u.username, u.profile_picture, p.* 
+        FROM posts p 
+        INNER JOIN users u ON p.user_id = u.id 
+        WHERE p.user_id = ? 
+        ORDER BY p.created_at DESC;
+    `;
+
+    db.query(postsQuery, [userId], (err, result) => {
+        if (err) {
+            return res.status(500).json({
+                success: false,
+                error: err.message,
+                data: null,
+            });
+        }
+
+        if (result.length === 0) {
+            return res.status(200).json({
+                success: true,
+                error: null,
+                data: [],
+            });
+        }
+
+        const postIds = result.map((post) => post.id);
+
+        let likesQuery = `
+            SELECT post_id, user_id
+            FROM likes
+            WHERE post_id IN (?);
+        `;
+
+        db.query(likesQuery, [postIds], (err, likesResult) => {
+            if (err) {
+                return res.status(500).json({
+                    success: false,
+                    error: err.message,
+                    data: null,
+                });
+            }
+
+            const likeCounts = likesResult.reduce((acc, like) => {
+                acc[like.post_id] = (acc[like.post_id] || 0) + 1;
+                return acc;
+            }, {});
+
+            const likedPostsByCurrentUser = new Set(likesResult.map((like) => like.post_id));
+
+            result.forEach((post) => {
+                const createdAt = new Date(post.created_at);
+                post.timeAgo = getTimeAgo(createdAt);
+                post.like_count = likeCounts[post.id] || 0;
+                post.liked_by_current_user = likedPostsByCurrentUser.has(post.id) ? 1 : 0;
+            });
+
+            if (postIds.length === 0) {
+                return res.status(200).json({
+                    success: true,
+                    error: null,
+                    data: result,
+                });
+            }
+
+            let commentsQuery = `
+                SELECT c.id, c.post_id, c.user_id, c.content, c.parent_comment_id, c.created_at, c.updated_at, u.username AS commenter_username, u.profile_picture AS commenter_profile_picture
+                FROM comments c
+                INNER JOIN users u ON c.user_id = u.id
+                WHERE c.post_id IN (?)
+                ORDER BY c.created_at DESC;
+            `;
+
+            db.query(commentsQuery, [postIds], (err, commentsResult) => {
+                if (err) {
+                    return res.status(500).json({
+                        success: false,
+                        error: err.message,
+                        data: null,
+                    });
+                }
+
+                const commentsByPostId = commentsResult.reduce((acc, comment) => {
+                    if (!acc[comment.post_id]) {
+                        acc[comment.post_id] = [];
+                    }
+                    comment.timeAgo = getTimeAgo(new Date(comment.created_at));
+                    acc[comment.post_id].push(comment);
+                    return acc;
+                }, {});
+
+                result.forEach((post) => {
+                    post.comment_count = commentsByPostId[post.id] ? commentsByPostId[post.id].length : 0;
+                    post.comments = commentsByPostId[post.id] || [];
+                });
+
+                res.status(200).json({
+                    success: true,
+                    error: null,
+                    data: result,
+                });
+            });
+        });
+    });
+}
 
 module.exports = router;
