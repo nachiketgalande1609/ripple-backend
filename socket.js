@@ -229,6 +229,67 @@ function initializeSocket(server, db) {
             });
         });
 
+        socket.on("viewStory", async (data) => {
+            const { user_id, story_id } = data;
+
+            if (!user_id || !story_id) return;
+
+            try {
+                // Check if the user is viewing their own story
+                const checkStoryOwnerQuery = `
+            SELECT user_id FROM stories 
+            WHERE id = ?
+        `;
+                db.query(checkStoryOwnerQuery, [story_id], (err, result) => {
+                    if (err) {
+                        console.error("Error checking story owner:", err);
+                        return;
+                    }
+
+                    // If the user is the owner of the story, don't register the view
+                    if (result.length > 0 && result[0].user_id === user_id) {
+                        console.log(`User ${user_id} is viewing their own story ${story_id}. No view will be registered.`);
+                        return;
+                    }
+
+                    // Check if the user has already viewed the story
+                    const checkQuery = `
+                SELECT * FROM story_views 
+                WHERE user_id = ? AND story_id = ?
+            `;
+                    db.query(checkQuery, [user_id, story_id], (err, result) => {
+                        if (err) {
+                            console.error("Error checking for existing view:", err);
+                            return;
+                        }
+
+                        if (result.length > 0) {
+                            console.log(`User ${user_id} has already viewed story ${story_id}`);
+                            return;
+                        }
+
+                        // Register the view if not already registered
+                        const query = `
+                    INSERT INTO story_views (user_id, story_id)
+                    VALUES (?, ?)
+                `;
+                        db.query(query, [user_id, story_id], (err, result) => {
+                            if (err) {
+                                console.error("Error inserting view:", err);
+                                return;
+                            }
+
+                            socket.emit("storyViewSuccess", { message: "Story view recorded successfully!" });
+
+                            socket.broadcast.emit("newStoryView", { user_id, story_id });
+                        });
+                    });
+                });
+            } catch (error) {
+                console.error("Error tracking story view:", error);
+            }
+        });
+
         // Handle disconnect event and clean up the mapping
         socket.on("disconnect", (reason) => {
             // console.log(`User ${socket.id} disconnected due to ${reason}`);

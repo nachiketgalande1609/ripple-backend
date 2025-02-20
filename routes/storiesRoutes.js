@@ -36,15 +36,15 @@ router.get("/", async (req, res) => {
                 s.media_width, s.media_height, s.created_at, 
                 u.id AS user_id, u.username, u.profile_picture
             FROM stories s
-            JOIN followers f ON s.user_id = f.following_id
             JOIN users u ON s.user_id = u.id
-            WHERE f.follower_id = ? 
+            LEFT JOIN followers f ON s.user_id = f.following_id
+            WHERE (f.follower_id = ? OR s.user_id = ?)  -- Added check for user's own stories
               AND s.is_active = 1
               AND (s.expires_at IS NULL OR s.expires_at > NOW())
             ORDER BY s.created_at DESC
         `;
 
-        db.query(query, [userId], (err, results) => {
+        db.query(query, [userId, userId], (err, results) => {
             if (err) {
                 return res.status(500).json({
                     success: false,
