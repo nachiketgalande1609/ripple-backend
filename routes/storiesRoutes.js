@@ -18,6 +18,56 @@ const s3 = new S3Client({
     },
 });
 
+router.get("/", async (req, res) => {
+    const { userId } = req.query; // Corrected from req.params to req.query
+
+    if (!userId) {
+        return res.status(400).json({
+            success: false,
+            error: "User ID is required.",
+            data: null,
+        });
+    }
+
+    try {
+        const query = `
+            SELECT 
+                s.id AS story_id, s.caption, s.media_url, s.media_type, 
+                s.media_width, s.media_height, s.created_at, 
+                u.id AS user_id, u.username, u.profile_picture
+            FROM stories s
+            JOIN followers f ON s.user_id = f.following_id
+            JOIN users u ON s.user_id = u.id
+            WHERE f.follower_id = ? 
+              AND s.is_active = 1
+              AND (s.expires_at IS NULL OR s.expires_at > NOW())
+            ORDER BY s.created_at DESC
+        `;
+
+        db.query(query, [userId], (err, results) => {
+            if (err) {
+                return res.status(500).json({
+                    success: false,
+                    error: err.message,
+                    data: null,
+                });
+            }
+
+            return res.status(200).json({
+                success: true,
+                stories: results,
+            });
+        });
+    } catch (error) {
+        console.error("Error fetching stories:", error);
+        return res.status(500).json({
+            success: false,
+            error: "Failed to fetch stories.",
+            data: null,
+        });
+    }
+});
+
 router.post("/upload", upload.single("media"), async (req, res) => {
     const { caption, user_id } = req.body;
     const file = req.file;
