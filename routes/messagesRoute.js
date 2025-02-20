@@ -191,4 +191,79 @@ router.post("/media", upload.single("image"), async (req, res) => {
     }
 });
 
+// Delete Message
+router.delete("/:messageId", async (req, res) => {
+    const { messageId } = req.params;
+
+    if (!messageId) {
+        return res.status(400).json({
+            success: false,
+            error: "Message ID is required.",
+            data: null,
+        });
+    }
+
+    try {
+        // Check if message exists
+        db.query("SELECT file_url FROM messages WHERE message_id = ?", [messageId], async (err, results) => {
+            if (err) {
+                return res.status(500).json({
+                    success: false,
+                    error: err.message,
+                    data: null,
+                });
+            }
+
+            if (results.length === 0) {
+                return res.status(404).json({
+                    success: false,
+                    error: "Message not found.",
+                    data: null,
+                });
+            }
+
+            const fileUrl = results[0].file_url;
+
+            // Delete message from database
+            db.query("DELETE FROM messages WHERE message_id = ?", [messageId], async (deleteErr) => {
+                if (deleteErr) {
+                    return res.status(500).json({
+                        success: false,
+                        error: deleteErr.message,
+                        data: null,
+                    });
+                }
+
+                // If there's a file attached, delete it from S3
+                if (fileUrl) {
+                    const key = fileUrl.split(".amazonaws.com/")[1]; // Extract S3 object key
+
+                    const deleteParams = {
+                        Bucket: process.env.AWS_S3_BUCKET_NAME,
+                        Key: key,
+                    };
+
+                    try {
+                        await s3.send(new DeleteObjectCommand(deleteParams));
+                    } catch (s3Error) {
+                        console.error("S3 Deletion Error:", s3Error);
+                    }
+                }
+
+                return res.json({
+                    success: true,
+                    error: null,
+                    data: "Message deleted successfully.",
+                });
+            });
+        });
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            error: error.message,
+            data: null,
+        });
+    }
+});
+
 module.exports = router;
