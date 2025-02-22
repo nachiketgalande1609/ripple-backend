@@ -290,6 +290,40 @@ function initializeSocket(server, db) {
             }
         });
 
+        // In your backend socket code
+        socket.on("callUser", (data) => {
+            const { from, to, signal, callerUsername, callerProfilePicture } = data; // Add callerProfilePicture
+            const receiverSocketId = userSockets[to];
+            if (receiverSocketId) {
+                io.to(receiverSocketId).emit("callReceived", { signal, from, callerUsername, callerProfilePicture }); // Pass callerProfilePicture
+            }
+        });
+
+        socket.on("answerCall", (data) => {
+            const { to, signal } = data;
+            const receiverSocketId = userSockets[to];
+            if (receiverSocketId) {
+                io.to(receiverSocketId).emit("callAnswered", { signal });
+            }
+        });
+
+        socket.on("iceCandidate", (data) => {
+            const { to, candidate } = data;
+            const receiverSocketId = userSockets[to];
+            if (receiverSocketId) {
+                io.to(receiverSocketId).emit("iceCandidateReceived", { candidate });
+            }
+        });
+
+        // Add this to your backend socket code
+        socket.on("endCall", (data) => {
+            const { to } = data;
+            const receiverSocketId = userSockets[to];
+            if (receiverSocketId) {
+                io.to(receiverSocketId).emit("endCall");
+            }
+        });
+
         // Handle disconnect event and clean up the mapping
         socket.on("disconnect", (reason) => {
             // console.log(`User ${socket.id} disconnected due to ${reason}`);
