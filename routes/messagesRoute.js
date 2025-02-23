@@ -31,7 +31,7 @@ router.get("/:currentUserId", (req, res) => {
     // Fetch users the current user has messaged with, excluding the current user
     db.query(
         `
-        SELECT DISTINCT u.id, u.username, u.profile_picture 
+        SELECT DISTINCT u.id, u.username, u.profile_picture, u.public_key 
         FROM users u
         JOIN messages m ON u.id = m.sender_id OR u.id = m.receiver_id
         WHERE (m.sender_id = ? OR m.receiver_id = ?) AND u.id != ?
@@ -50,7 +50,7 @@ router.get("/:currentUserId", (req, res) => {
             // Fetch all messages where the user is either sender or receiver
             db.query(
                 `
-            SELECT message_id ,sender_id, receiver_id, message_text, file_url, timestamp , delivered, delivered_timestamp, is_read, read_timestamp, file_name, file_size, reply_to, media_width, media_height, reactions
+            SELECT message_id, sender_id, receiver_id, message_text, file_url, timestamp, delivered, delivered_timestamp, is_read, read_timestamp, file_name, file_size, reply_to, media_width, media_height, reactions
             FROM messages 
             WHERE sender_id = ? OR receiver_id = ?
             ORDER BY timestamp ASC;
