@@ -19,12 +19,22 @@ const s3 = new S3Client({
 });
 
 router.get("/", async (req, res) => {
-    const { userId } = req.query; // Corrected from req.params to req.query
+    const { userId } = req.query;
 
     if (!userId) {
         return res.status(400).json({
             success: false,
             error: "User ID is required.",
+            data: null,
+        });
+    }
+
+    // Convert userId to a number for consistent comparison
+    const numericUserId = parseInt(userId, 10);
+    if (isNaN(numericUserId)) {
+        return res.status(400).json({
+            success: false,
+            error: "Invalid User ID.",
             data: null,
         });
     }
@@ -46,16 +56,16 @@ router.get("/", async (req, res) => {
             FROM stories s
             JOIN users u ON s.user_id = u.id
             LEFT JOIN followers f ON s.user_id = f.following_id
-            LEFT JOIN story_views v ON s.id = v.story_id  -- Join with story_views table
-            LEFT JOIN users viewer ON v.user_id = viewer.id  -- Get the viewer's username
-            WHERE (f.follower_id = ? OR s.user_id = ?)  -- Added check for user's own stories
+            LEFT JOIN story_views v ON s.id = v.story_id
+            LEFT JOIN users viewer ON v.user_id = viewer.id
+            WHERE (f.follower_id = ? OR s.user_id = ?)
               AND s.is_active = 1
               AND (s.expires_at IS NULL OR s.expires_at > NOW())
-            GROUP BY s.id, u.id  -- Group by story and user to get all viewers for each story
+            GROUP BY s.id, u.id
             ORDER BY s.created_at DESC
         `;
 
-        db.query(query, [userId, userId], (err, results) => {
+        db.query(query, [numericUserId, numericUserId], (err, results) => {
             if (err) {
                 return res.status(500).json({
                     success: false,
@@ -64,16 +74,22 @@ router.get("/", async (req, res) => {
                 });
             }
 
-            // Ensure viewers are parsed properly
-            results.forEach((story) => {
+            // Parse viewers and split stories into self and following
+            const processedResults = results.map((story) => {
                 if (story.viewers && typeof story.viewers === "string") {
-                    story.viewers = JSON.parse(story.viewers); // Only parse if it's a string
+                    story.viewers = JSON.parse(story.viewers);
                 }
+                return story;
             });
+
+            // Separate stories into self and following
+            const selfStories = processedResults.filter((story) => story.user_id === numericUserId);
+            const followingStories = processedResults.filter((story) => story.user_id !== numericUserId);
 
             return res.status(200).json({
                 success: true,
-                stories: results,
+                selfStory: selfStories,
+                stories: followingStories,
             });
         });
     } catch (error) {
