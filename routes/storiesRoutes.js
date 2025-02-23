@@ -74,7 +74,7 @@ router.get("/", async (req, res) => {
                 });
             }
 
-            // Parse viewers and split stories into self and following
+            // Parse viewers if stored as JSON string
             const processedResults = results.map((story) => {
                 if (story.viewers && typeof story.viewers === "string") {
                     story.viewers = JSON.parse(story.viewers);
@@ -82,9 +82,14 @@ router.get("/", async (req, res) => {
                 return story;
             });
 
-            // Separate stories into self and following
-            const selfStories = processedResults.filter((story) => story.user_id === numericUserId);
-            const followingStories = processedResults.filter((story) => story.user_id !== numericUserId);
+            // Separate self stories and following stories
+            const selfStories = processedResults
+                .filter((story) => story.user_id === numericUserId)
+                .sort((b, a) => new Date(b.created_at) - new Date(a.created_at)); // Sort self stories
+
+            const followingStories = processedResults
+                .filter((story) => story.user_id !== numericUserId)
+                .sort((b, a) => new Date(b.created_at) - new Date(a.created_at)); // Sort following stories
 
             return res.status(200).json({
                 success: true,
