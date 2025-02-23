@@ -8,10 +8,12 @@ const { OAuth2Client } = require("google-auth-library");
 const client = new OAuth2Client("702353220748-2lmc03lb4tcfnuqds67h8bbupmb1aa0q.apps.googleusercontent.com");
 
 router.post("/register", async (req, res) => {
-    const { email, username, password } = req.body;
+    const { email, username, password, publicKey, encryptedPrivateKey } = req.body;
 
+    // Hash the password
     const hashedPassword = await bcrypt.hash(password, 10);
 
+    // Check if the user already exists
     const checkUserQuery = "SELECT * FROM users WHERE email = ? OR username = ?";
     db.query(checkUserQuery, [email, username], (err, result) => {
         if (err) {
@@ -40,8 +42,12 @@ router.post("/register", async (req, res) => {
             }
         }
 
-        const insertQuery = "INSERT INTO users (username, email, password) VALUES (?, ?, ?)";
-        db.query(insertQuery, [username, email, hashedPassword], async (err, result) => {
+        // Insert the new user into the database
+        const insertQuery = `
+            INSERT INTO users (username, email, password, public_key, encrypted_private_key)
+            VALUES (?, ?, ?, ?, ?)
+        `;
+        db.query(insertQuery, [username, email, hashedPassword, publicKey, encryptedPrivateKey], async (err, result) => {
             if (err) {
                 return res.status(500).json({
                     success: false,
@@ -51,8 +57,16 @@ router.post("/register", async (req, res) => {
             }
 
             // Create a JWT token after registration
-            const user = { id: result.insertId, username, email }; // Adjust this as needed
-            const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, { expiresIn: "1h" });
+            const user = {
+                id: result.insertId,
+                username,
+                email,
+                publicKey,
+                encryptedPrivateKey,
+            };
+            const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, {
+                expiresIn: "1h",
+            });
 
             res.status(201).json({
                 success: true,
@@ -64,6 +78,8 @@ router.post("/register", async (req, res) => {
                         id: user.id,
                         username: user.username,
                         email: user.email,
+                        publicKey: user.publicKey,
+                        encryptedPrivateKey: user.encryptedPrivateKey,
                     },
                 },
             });
@@ -75,7 +91,12 @@ router.post("/register", async (req, res) => {
 router.post("/login", (req, res) => {
     const { email, password } = req.body;
 
-    const query = "SELECT id, username, email, password, profile_picture, is_private FROM users WHERE email = ?";
+    // Step 1: Fetch user details including the encrypted private key
+    const query = `
+        SELECT id, username, email, password, profile_picture, is_private, encrypted_private_key
+        FROM users
+        WHERE email = ?
+    `;
 
     db.query(query, [email], async (err, results) => {
         if (err || results.length === 0) {
@@ -87,6 +108,8 @@ router.post("/login", (req, res) => {
         }
 
         const user = results[0];
+
+        // Step 2: Verify the password
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) {
             return res.status(400).json({
@@ -96,8 +119,10 @@ router.post("/login", (req, res) => {
             });
         }
 
+        // Step 3: Generate a JWT token
         const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, { expiresIn: "1h" });
 
+        // Step 4: Return the token, user details, and encrypted private key
         res.json({
             success: true,
             error: null,
@@ -110,6 +135,7 @@ router.post("/login", (req, res) => {
                     profile_picture_url: user.profile_picture,
                     is_private: user.is_private,
                 },
+                encryptedPrivateKey: user.encrypted_private_key, // Include the encrypted private key
             },
         });
     });
