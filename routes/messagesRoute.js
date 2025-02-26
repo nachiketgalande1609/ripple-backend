@@ -50,11 +50,22 @@ router.get("/:currentUserId", (req, res) => {
             // Fetch all messages where the user is either sender or receiver
             db.query(
                 `
-            SELECT message_id, sender_id, receiver_id, message_text, file_url, timestamp, delivered, delivered_timestamp, is_read, read_timestamp, file_name, file_size, reply_to, media_width, media_height, reactions
-            FROM messages 
-            WHERE sender_id = ? OR receiver_id = ?
-            ORDER BY timestamp ASC;
-        `,
+                    SELECT 
+                        m.message_id, m.sender_id, m.receiver_id, m.message_text, 
+                        m.file_url, m.timestamp, m.delivered, m.delivered_timestamp, 
+                        m.is_read, m.read_timestamp, m.file_name, m.file_size, 
+                        m.reply_to, m.media_width, m.media_height, m.reactions, m.post_id,
+                        
+                        p.file_url AS post_file_url, p.media_width AS post_media_width, 
+                        p.media_height AS post_media_height, p.content AS post_content, p.user_id AS post_owner_id,
+
+                        u.username AS post_owner_username, u.profile_picture AS post_owner_profile_picture
+                    FROM messages m
+                    LEFT JOIN posts p ON m.post_id = p.id
+                    LEFT JOIN users u ON p.user_id = u.id
+                    WHERE m.sender_id = ? OR m.receiver_id = ?
+                    ORDER BY m.timestamp ASC;
+                `,
                 [currentUserId, currentUserId],
                 (messagesErr, messagesResults) => {
                     if (messagesErr) {
@@ -90,6 +101,20 @@ router.get("/:currentUserId", (req, res) => {
                             media_width: msg.media_width,
                             media_height: msg.media_height,
                             reactions: msg.reactions,
+                            post: msg.post_id
+                                ? {
+                                      post_id: msg.post_id,
+                                      file_url: msg.post_file_url,
+                                      media_width: msg.post_media_width,
+                                      media_height: msg.post_media_height,
+                                      content: msg.post_content,
+                                      owner: {
+                                          user_id: msg.post_owner_id,
+                                          username: msg.post_owner_username,
+                                          profile_picture: msg.post_owner_profile_picture,
+                                      },
+                                  }
+                                : null,
                         });
                     });
 
