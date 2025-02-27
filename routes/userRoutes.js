@@ -82,7 +82,7 @@ router.get("/profile/:userId", async (req, res) => {
     }
 });
 
-router.post("/profile/picture", upload.single("profile_pic"), async (req, res) => {
+router.post("/update-profile-picture", upload.single("profile_pic"), async (req, res) => {
     const { user_id } = req.body;
     const file = req.file;
 

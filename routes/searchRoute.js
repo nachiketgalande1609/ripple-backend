@@ -2,7 +2,7 @@ const express = require("express");
 const db = require("../db");
 const router = express.Router();
 
-router.get("/", (req, res) => {
+router.get("/search-users", (req, res) => {
     const { searchString } = req.query; // Extract search string from query parameters
 
     if (!searchString || searchString.trim().length === 0) {
@@ -51,7 +51,7 @@ router.get("/", (req, res) => {
     });
 });
 
-router.get("/history", (req, res) => {
+router.get("/fetch-search-history", (req, res) => {
     const { userId } = req.query;
 
     const query = `
@@ -75,7 +75,7 @@ router.get("/history", (req, res) => {
 });
 
 // Add to search history when user is clicked
-router.post("/history", (req, res) => {
+router.post("/update-search-history", (req, res) => {
     const { userId, target_user_id } = req.body;
 
     if (!target_user_id) {
@@ -94,7 +94,7 @@ router.post("/history", (req, res) => {
     });
 });
 
-router.delete("/history", (req, res) => {
+router.delete("/delete-search-history", (req, res) => {
     const { userId, historyId } = req.query;
 
     const query = `
