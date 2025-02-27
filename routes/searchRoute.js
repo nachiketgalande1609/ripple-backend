@@ -82,11 +82,9 @@ router.post("/update-search-history", (req, res) => {
         return res.status(400).json({ error: "Target user ID is required" });
     }
 
-    // Delete old entry if exists
     db.query("DELETE FROM search_history WHERE user_id = ? AND target_user_id = ?", [userId, target_user_id], (deleteErr) => {
         if (deleteErr) return res.status(500).json({ error: deleteErr.message });
 
-        // Insert the new entry
         db.query("INSERT INTO search_history (user_id, target_user_id) VALUES (?, ?)", [userId, target_user_id], (insertErr) => {
             if (insertErr) return res.status(500).json({ error: insertErr.message });
             res.json({ success: true });
