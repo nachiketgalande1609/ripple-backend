@@ -52,7 +52,7 @@ router.get("/search-users", (req, res) => {
 });
 
 router.get("/fetch-search-history", (req, res) => {
-    const { userId } = req.query;
+    const userId = req.headers["x-current-user-id"];
 
     const query = `
     SELECT 
@@ -76,7 +76,8 @@ router.get("/fetch-search-history", (req, res) => {
 
 // Add to search history when user is clicked
 router.post("/update-search-history", (req, res) => {
-    const { userId, target_user_id } = req.body;
+    const { target_user_id } = req.body;
+    const userId = req.headers["x-current-user-id"];
 
     if (!target_user_id) {
         return res.status(400).json({ error: "Target user ID is required" });

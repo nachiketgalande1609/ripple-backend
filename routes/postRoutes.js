@@ -19,8 +19,9 @@ const s3 = new S3Client({
 });
 
 // Like Post
-router.post("/like", (req, res) => {
-    const { userId, postId } = req.body;
+router.post("/like-post", (req, res) => {
+    const userId = req.headers["x-current-user-id"];
+    const { postId } = req.body;
 
     if (!userId || !postId) {
         return res.status(400).json({

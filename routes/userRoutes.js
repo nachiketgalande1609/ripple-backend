@@ -146,8 +146,9 @@ router.post("/update-profile-picture", upload.single("profile_pic"), async (req,
     }
 });
 
-router.put("/profile/update", async (req, res) => {
-    const { userId, updatedProfile } = req.body;
+router.put("/profile/update-profile-details", async (req, res) => {
+    const userId = req.headers["x-current-user-id"];
+    const { updatedProfile } = req.body;
 
     // Validate required fields
     if (!userId || !updatedProfile) {
