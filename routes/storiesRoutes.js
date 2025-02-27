@@ -18,7 +18,7 @@ const s3 = new S3Client({
     },
 });
 
-router.get("/", async (req, res) => {
+router.get("/fetch-user-stories", async (req, res) => {
     const { userId } = req.query;
 
     if (!userId) {
@@ -107,7 +107,7 @@ router.get("/", async (req, res) => {
     }
 });
 
-router.post("/upload", upload.single("media"), async (req, res) => {
+router.post("/upload-story", upload.single("media"), async (req, res) => {
     const { caption, user_id } = req.body;
     const file = req.file;
 

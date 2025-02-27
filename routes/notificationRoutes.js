@@ -2,7 +2,7 @@ const express = require("express");
 const db = require("../db");
 const router = express.Router();
 
-router.get("/:userId", (req, res) => {
+router.get("/fetch-notifications/:userId", (req, res) => {
     const { userId } = req.params;
 
     const query = `
@@ -47,8 +47,8 @@ router.get("/:userId", (req, res) => {
 });
 
 // Route to fetch unread notifications and messages count
-router.get("/count/:userId", (req, res) => {
-    const { userId } = req.params;
+router.get("/fetch-notifications-count", (req, res) => {
+    const { userId } = req.query;
 
     const query = `
         SELECT 
