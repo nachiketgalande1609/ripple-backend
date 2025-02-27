@@ -16,10 +16,9 @@ const s3 = new S3Client({
     },
 });
 
-router.get("/profile/:userId", async (req, res) => {
+router.get("/fetch-profile-details", async (req, res) => {
     try {
-        const { userId } = req.params;
-        const { currentUserId } = req.query;
+        const { currentUserId, userId } = req.query;
 
         // Fetch user profile
         const userQuery = "SELECT id, username, email, bio, profile_picture, is_private FROM users WHERE id = ?";

@@ -2,8 +2,8 @@ const express = require("express");
 const db = require("../db");
 const router = express.Router();
 
-router.get("/fetch-notifications/:userId", (req, res) => {
-    const { userId } = req.params;
+router.get("/fetch-notifications", (req, res) => {
+    const { userId } = req.query;
 
     const query = `
         SELECT n.id, n.type, n.message, n.post_id, n.created_at,

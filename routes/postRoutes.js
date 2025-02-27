@@ -489,9 +489,8 @@ router.get("/fetch-posts", async (req, res) => {
 });
 
 // Fetch Profile Page Posts
-router.post(["/fetch-profile-posts/:userId"], (req, res) => {
-    const { userId } = req.params;
-    const { currentUserId } = req.body;
+router.get(["/fetch-profile-posts"], (req, res) => {
+    const { currentUserId, userId } = req.query;
 
     // Query to check if the user is private
     const privacyQuery = `
