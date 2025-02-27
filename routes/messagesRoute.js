@@ -28,7 +28,6 @@ const s3 = new S3Client({
 router.get("/fetch-users", (req, res) => {
     const currentUserId = req.headers["x-current-user-id"];
 
-    // Fetch users the current user has messaged with, excluding the current user
     db.query(
         `
         SELECT DISTINCT u.id, u.username, u.profile_picture, u.public_key, 
@@ -43,13 +42,18 @@ router.get("/fetch-users", (req, res) => {
              WHERE (m2.sender_id = u.id AND m2.receiver_id = ?) 
                 OR (m2.receiver_id = u.id AND m2.sender_id = ?)
              ORDER BY m2.timestamp DESC 
-             LIMIT 1) AS latest_message_timestamp
+             LIMIT 1) AS latest_message_timestamp,
+            (SELECT COUNT(*) 
+             FROM messages m3 
+             WHERE m3.sender_id = u.id 
+               AND m3.receiver_id = ? 
+               AND m3.is_read = 0) AS unread_count
         FROM users u
         JOIN messages m ON u.id = m.sender_id OR u.id = m.receiver_id
         WHERE (m.sender_id = ? OR m.receiver_id = ?) AND u.id != ?
         ORDER BY u.username;
         `,
-        [currentUserId, currentUserId, currentUserId, currentUserId, currentUserId, currentUserId, currentUserId],
+        [currentUserId, currentUserId, currentUserId, currentUserId, currentUserId, currentUserId, currentUserId, currentUserId],
         (usersErr, usersResults) => {
             if (usersErr) {
                 return res.status(500).json({
