@@ -25,19 +25,31 @@ const s3 = new S3Client({
 });
 
 // Get all messages and users for the current user
-router.get("/fetch-users-messages", (req, res) => {
+router.get("/fetch-users", (req, res) => {
     const currentUserId = req.headers["x-current-user-id"];
 
     // Fetch users the current user has messaged with, excluding the current user
     db.query(
         `
-        SELECT DISTINCT u.id, u.username, u.profile_picture, u.public_key 
+        SELECT DISTINCT u.id, u.username, u.profile_picture, u.public_key, 
+            (SELECT m1.message_text 
+             FROM messages m1 
+             WHERE (m1.sender_id = u.id AND m1.receiver_id = ?) 
+                OR (m1.receiver_id = u.id AND m1.sender_id = ?)
+             ORDER BY m1.timestamp DESC 
+             LIMIT 1) AS latest_message,
+            (SELECT m2.timestamp 
+             FROM messages m2 
+             WHERE (m2.sender_id = u.id AND m2.receiver_id = ?) 
+                OR (m2.receiver_id = u.id AND m2.sender_id = ?)
+             ORDER BY m2.timestamp DESC 
+             LIMIT 1) AS latest_message_timestamp
         FROM users u
         JOIN messages m ON u.id = m.sender_id OR u.id = m.receiver_id
         WHERE (m.sender_id = ? OR m.receiver_id = ?) AND u.id != ?
         ORDER BY u.username;
-    `,
-        [currentUserId, currentUserId, currentUserId],
+        `,
+        [currentUserId, currentUserId, currentUserId, currentUserId, currentUserId, currentUserId, currentUserId],
         (usersErr, usersResults) => {
             if (usersErr) {
                 return res.status(500).json({
@@ -47,84 +59,95 @@ router.get("/fetch-users-messages", (req, res) => {
                 });
             }
 
-            // Fetch all messages where the user is either sender or receiver
-            db.query(
-                `
-                    SELECT 
-                        m.message_id, m.sender_id, m.receiver_id, m.message_text, 
-                        m.file_url, m.timestamp, m.delivered, m.delivered_timestamp, 
-                        m.is_read, m.read_timestamp, m.file_name, m.file_size, 
-                        m.reply_to, m.media_width, m.media_height, m.reactions, m.post_id,
-                        
-                        p.file_url AS post_file_url, p.media_width AS post_media_width, 
-                        p.media_height AS post_media_height, p.content AS post_content, p.user_id AS post_owner_id,
+            res.json({
+                success: true,
+                data: usersResults,
+                error: null,
+            });
+        }
+    );
+});
 
-                        u.username AS post_owner_username, u.profile_picture AS post_owner_profile_picture
-                    FROM messages m
-                    LEFT JOIN posts p ON m.post_id = p.id
-                    LEFT JOIN users u ON p.user_id = u.id
-                    WHERE m.sender_id = ? OR m.receiver_id = ?
-                    ORDER BY m.timestamp ASC;
-                `,
-                [currentUserId, currentUserId],
-                (messagesErr, messagesResults) => {
-                    if (messagesErr) {
-                        return res.status(500).json({
-                            success: false,
-                            error: messagesErr.message,
-                            data: null,
-                        });
-                    }
+router.get("/fetch-messages", (req, res) => {
+    const currentUserId = req.headers["x-current-user-id"];
+    const selectedUserId = req.query.selectedUserId;
 
-                    // Organize messages by user
-                    const groupedMessages = {};
-                    messagesResults.forEach((msg) => {
-                        const chatPartnerId = msg.sender_id === parseInt(currentUserId) ? msg.receiver_id : msg.sender_id;
+    // Fetch all messages where the user is either sender or receiver
+    db.query(
+        `
+        SELECT 
+            m.message_id, m.sender_id, m.receiver_id, m.message_text, 
+            m.file_url, m.timestamp, m.delivered, m.delivered_timestamp, 
+            m.is_read, m.read_timestamp, m.file_name, m.file_size, 
+            m.reply_to, m.media_width, m.media_height, m.reactions, m.post_id,
+            
+            p.file_url AS post_file_url, p.media_width AS post_media_width, 
+            p.media_height AS post_media_height, p.content AS post_content, p.user_id AS post_owner_id,
 
-                        if (!groupedMessages[chatPartnerId]) {
-                            groupedMessages[chatPartnerId] = [];
-                        }
+            u.username AS post_owner_username, u.profile_picture AS post_owner_profile_picture
+        FROM messages m
+        LEFT JOIN posts p ON m.post_id = p.id
+        LEFT JOIN users u ON p.user_id = u.id
+        WHERE (m.sender_id = ? AND m.receiver_id = ?) OR (m.sender_id = ? AND m.receiver_id = ?)
+        ORDER BY m.timestamp ASC;
+    `,
+        [currentUserId, selectedUserId, selectedUserId, currentUserId],
+        (messagesErr, messagesResults) => {
+            if (messagesErr) {
+                return res.status(500).json({
+                    success: false,
+                    error: messagesErr.message,
+                    data: null,
+                });
+            }
 
-                        groupedMessages[chatPartnerId].push({
-                            message_id: msg.message_id,
-                            sender_id: msg.sender_id,
-                            message_text: msg.message_text,
-                            file_url: msg.file_url,
-                            timestamp: msg.timestamp,
-                            delivered: msg.delivered,
-                            read: msg.is_read,
-                            delivered_timestamp: msg.delivered_timestamp,
-                            read_timestamp: msg.read_timestamp,
-                            file_name: msg.file_name,
-                            file_size: msg.file_size,
-                            reply_to: msg.reply_to,
-                            media_width: msg.media_width,
-                            media_height: msg.media_height,
-                            reactions: msg.reactions,
-                            post: msg.post_id
-                                ? {
-                                      post_id: msg.post_id,
-                                      file_url: msg.post_file_url,
-                                      media_width: msg.post_media_width,
-                                      media_height: msg.post_media_height,
-                                      content: msg.post_content,
-                                      owner: {
-                                          user_id: msg.post_owner_id,
-                                          username: msg.post_owner_username,
-                                          profile_picture: msg.post_owner_profile_picture,
-                                      },
-                                  }
-                                : null,
-                        });
-                    });
+            // Organize messages by user
+            const groupedMessages = {};
+            messagesResults.forEach((msg) => {
+                const chatPartnerId = msg.sender_id === parseInt(currentUserId) ? msg.receiver_id : msg.sender_id;
 
-                    res.json({
-                        success: true,
-                        data: { users: usersResults, messages: groupedMessages },
-                        error: null,
-                    });
+                if (!groupedMessages[chatPartnerId]) {
+                    groupedMessages[chatPartnerId] = [];
                 }
-            );
+
+                groupedMessages[chatPartnerId].push({
+                    message_id: msg.message_id,
+                    sender_id: msg.sender_id,
+                    message_text: msg.message_text,
+                    file_url: msg.file_url,
+                    timestamp: msg.timestamp,
+                    delivered: msg.delivered,
+                    read: msg.is_read,
+                    delivered_timestamp: msg.delivered_timestamp,
+                    read_timestamp: msg.read_timestamp,
+                    file_name: msg.file_name,
+                    file_size: msg.file_size,
+                    reply_to: msg.reply_to,
+                    media_width: msg.media_width,
+                    media_height: msg.media_height,
+                    reactions: msg.reactions,
+                    post: msg.post_id
+                        ? {
+                              post_id: msg.post_id,
+                              file_url: msg.post_file_url,
+                              media_width: msg.post_media_width,
+                              media_height: msg.post_media_height,
+                              content: msg.post_content,
+                              owner: {
+                                  user_id: msg.post_owner_id,
+                                  username: msg.post_owner_username,
+                                  profile_picture: msg.post_owner_profile_picture,
+                              },
+                          }
+                        : null,
+                });
+            });
+
+            res.json({
+                success: true,
+                data: groupedMessages[selectedUserId] || [], // Return messages for the selected user
+                error: null,
+            });
         }
     );
 });
