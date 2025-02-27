@@ -390,147 +390,106 @@ router.post("/save", (req, res) => {
 });
 
 // Fetch Home Page Posts
-router.get("/", (req, res) => {
-    const { userId } = req.params.userId ? req.params : req.query;
+router.get("/fetch-posts", async (req, res) => {
+    try {
+        const { userId } = req.query;
 
-    let postsQuery = `
-        SELECT u.username,
-            u.profile_picture,
-            p.*,
-            IF(sp.user_id IS NOT NULL, 1, 0) AS saved_by_current_user
-        FROM posts p
-        INNER JOIN users u
-            ON p.user_id = u.id
-        LEFT JOIN followers f
-            ON p.user_id = f.following_id
-        LEFT JOIN saved_posts sp
-            ON p.id = sp.post_id AND sp.user_id = p.user_id
-        WHERE f.follower_id = ? OR p.user_id = ?
-        ORDER BY p.created_at DESC;
-    `;
+        let postsQuery = `
+            SELECT u.username,
+                u.profile_picture,
+                p.*,
+                IF(sp.user_id IS NOT NULL, 1, 0) AS saved_by_current_user
+            FROM posts p
+            INNER JOIN users u ON p.user_id = u.id
+            LEFT JOIN followers f ON p.user_id = f.following_id
+            LEFT JOIN saved_posts sp ON p.id = sp.post_id AND sp.user_id = ?
+            WHERE f.follower_id = ? OR p.user_id = ?
+            ORDER BY p.created_at DESC;
+        `;
 
-    db.query(postsQuery, [userId, userId], (err, result) => {
-        if (err) {
-            return res.status(500).json({
-                success: false,
-                error: err.message,
-                data: null,
+        // Fetch posts
+        const [postsResult] = await db.promise().query(postsQuery, [userId, userId, userId]);
+        if (!postsResult.length) {
+            return res.status(200).json({
+                success: true,
+                error: null,
+                data: [],
             });
         }
 
-        // Fetch like counts for each post
-        const postIds = result.map((post) => post.id);
+        // Extract post IDs
+        const postIds = postsResult.map((post) => post.id);
+        if (postIds.length === 0) {
+            return res.status(200).json({
+                success: true,
+                error: null,
+                data: [],
+            });
+        }
 
+        // Fetch like counts
         let likesQuery = `SELECT post_id, COUNT(*) AS like_count FROM likes WHERE post_id IN (?) GROUP BY post_id;`;
+        const [likesResult] = await db.promise().query(likesQuery, [postIds]);
+        const likeCounts = likesResult.reduce((acc, like) => {
+            acc[like.post_id] = like.like_count;
+            return acc;
+        }, {});
 
-        db.query(likesQuery, [postIds], (err, likesResult) => {
-            if (err) {
-                return res.status(500).json({
-                    success: false,
-                    error: err.message,
-                    data: null,
-                });
+        // Fetch liked posts by the user
+        let likedPostsByCurrentUser = new Set();
+        if (userId) {
+            let likedPostsQuery = `SELECT post_id FROM likes WHERE user_id = ? AND post_id IN (?);`;
+            const [likedPostsResult] = await db.promise().query(likedPostsQuery, [userId, postIds]);
+            likedPostsByCurrentUser = new Set(likedPostsResult.map((like) => like.post_id));
+        }
+
+        // Fetch comments
+        let commentsQuery = `
+            SELECT c.id, c.post_id, c.user_id, c.content, c.parent_comment_id, c.created_at, c.updated_at, 
+                   u.username AS commenter_username, u.profile_picture AS commenter_profile_picture
+            FROM comments c
+            INNER JOIN users u ON c.user_id = u.id
+            WHERE c.post_id IN (?)
+            ORDER BY c.created_at DESC;
+        `;
+        const [commentsResult] = await db.promise().query(commentsQuery, [postIds]);
+
+        // Organize comments by post_id
+        const commentsByPostId = commentsResult.reduce((acc, comment) => {
+            if (!acc[comment.post_id]) {
+                acc[comment.post_id] = [];
             }
+            comment.timeAgo = getTimeAgo(new Date(comment.created_at));
+            acc[comment.post_id].push(comment);
+            return acc;
+        }, {});
 
-            // Create a map of post_id to like_count
-            const likeCounts = likesResult.reduce((acc, like) => {
-                acc[like.post_id] = like.like_count;
-                return acc;
-            }, {});
-
-            // If userId is provided, fetch liked posts by the current user
-            if (userId) {
-                let likedPostsQuery = `
-                    SELECT post_id
-                    FROM likes
-                    WHERE user_id = ?
-                    AND post_id IN (?);
-                `;
-
-                db.query(likedPostsQuery, [userId, postIds], (err, likedPostsResult) => {
-                    if (err) {
-                        return res.status(500).json({
-                            success: false,
-                            error: err.message,
-                            data: null,
-                        });
-                    }
-
-                    // Create a set of post_ids that the user has liked
-                    const likedPostsByCurrentUser = new Set(likedPostsResult.map((like) => like.post_id));
-
-                    // Add like count and like status to posts
-                    result.forEach((post) => {
-                        const createdAt = new Date(post.created_at);
-                        post.timeAgo = getTimeAgo(createdAt);
-
-                        // Set the like count
-                        post.like_count = likeCounts[post.id] || 0;
-
-                        // If userId is provided, check if the current user liked the post
-                        post.liked_by_current_user = likedPostsByCurrentUser.has(post.id) ? 1 : 0;
-                    });
-
-                    // Fetch comments for each post
-                    let commentsQuery = `
-                        SELECT c.id, c.post_id, c.user_id, c.content, c.parent_comment_id, c.created_at, c.updated_at, 
-                               u.username AS commenter_username, u.profile_picture AS commenter_profile_picture
-                        FROM comments c
-                        INNER JOIN users u ON c.user_id = u.id
-                        WHERE c.post_id IN (?)
-                        ORDER BY c.created_at DESC;
-                    `;
-
-                    db.query(commentsQuery, [postIds], (err, commentsResult) => {
-                        if (err) {
-                            return res.status(500).json({
-                                success: false,
-                                error: err.message,
-                                data: null,
-                            });
-                        }
-
-                        // Organize comments by post_id and set timeAgo for each comment
-                        const commentsByPostId = commentsResult.reduce((acc, comment) => {
-                            if (!acc[comment.post_id]) {
-                                acc[comment.post_id] = [];
-                            }
-                            comment.timeAgo = getTimeAgo(new Date(comment.created_at)); // Set timeAgo for comment
-                            acc[comment.post_id].push(comment);
-                            return acc;
-                        }, {});
-
-                        // Add comment count and comments to posts
-                        result.forEach((post) => {
-                            post.comment_count = commentsByPostId[post.id] ? commentsByPostId[post.id].length : 0; // Add comment count
-                            post.comments = commentsByPostId[post.id] || []; // Add comments
-                        });
-
-                        res.status(200).json({
-                            success: true,
-                            error: null,
-                            data: result,
-                        });
-                    });
-                });
-            } else {
-                // If no userId is provided, simply return the posts with like counts
-                result.forEach((post) => {
-                    post.like_count = likeCounts[post.id] || 0;
-                });
-
-                res.status(200).json({
-                    success: true,
-                    error: null,
-                    data: result,
-                });
-            }
+        // Finalize posts data
+        postsResult.forEach((post) => {
+            post.timeAgo = getTimeAgo(new Date(post.created_at));
+            post.like_count = likeCounts[post.id] || 0;
+            post.liked_by_current_user = likedPostsByCurrentUser.has(post.id) ? 1 : 0;
+            post.comment_count = commentsByPostId[post.id] ? commentsByPostId[post.id].length : 0;
+            post.comments = commentsByPostId[post.id] || [];
         });
-    });
+
+        return res.status(200).json({
+            success: true,
+            error: null,
+            data: postsResult,
+        });
+    } catch (error) {
+        console.error("Error fetching posts:", error);
+        return res.status(500).json({
+            success: false,
+            error: "An error occurred while fetching posts. Please try again later.",
+            data: null,
+        });
+    }
 });
 
 // Fetch Profile Page Posts
-router.post(["/:userId"], (req, res) => {
+router.post(["/fetch-profile-posts/:userId"], (req, res) => {
     const { userId } = req.params;
     const { currentUserId } = req.body;
 
@@ -596,7 +555,7 @@ router.post(["/:userId"], (req, res) => {
 });
 
 // Create Post
-router.post("/", upload.single("image"), async (req, res) => {
+router.post("/create-post", upload.single("image"), async (req, res) => {
     const { content, location, user_id } = req.body;
     const file = req.file;
 
@@ -734,7 +693,7 @@ router.post("/update/:postId", (req, res) => {
 });
 
 // Delete Post
-router.delete("/", (req, res) => {
+router.delete("/delete-post", (req, res) => {
     const { userId, postId } = req.query;
 
     if (!userId) {
