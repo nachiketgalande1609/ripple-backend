@@ -20,10 +20,10 @@ const s3 = new S3Client({
 
 // Like Post
 router.post("/like-post", (req, res) => {
-    const userId = req.headers["x-current-user-id"];
+    const currentUserId = req.headers["x-current-user-id"];
     const { postId } = req.body;
 
-    if (!userId || !postId) {
+    if (!currentUserId || !postId) {
         return res.status(400).json({
             success: false,
             error: "User ID and Post ID are required.",
@@ -33,7 +33,7 @@ router.post("/like-post", (req, res) => {
 
     const checkLikeQuery = "SELECT * FROM likes WHERE user_id = ? AND post_id = ?";
 
-    db.query(checkLikeQuery, [userId, postId], (err, result) => {
+    db.query(checkLikeQuery, [currentUserId, postId], (err, result) => {
         if (err) {
             return res.status(500).json({
                 success: false,
@@ -46,7 +46,7 @@ router.post("/like-post", (req, res) => {
             // Unlike the post
             const removeLikeQuery = "DELETE FROM likes WHERE user_id = ? AND post_id = ?";
 
-            db.query(removeLikeQuery, [userId, postId], (err) => {
+            db.query(removeLikeQuery, [currentUserId, postId], (err) => {
                 if (err) {
                     return res.status(500).json({
                         success: false,
@@ -78,7 +78,7 @@ router.post("/like-post", (req, res) => {
             // Like the post
             const addLikeQuery = "INSERT INTO likes (user_id, post_id, created_at) VALUES (?, ?, NOW())";
 
-            db.query(addLikeQuery, [userId, postId], (err) => {
+            db.query(addLikeQuery, [currentUserId, postId], (err) => {
                 if (err) {
                     return res.status(500).json({
                         success: false,
@@ -109,7 +109,7 @@ router.post("/like-post", (req, res) => {
                     }
 
                     // Check if the user is liking their own post
-                    if (userId === postAuthorId) {
+                    if (currentUserId === postAuthorId) {
                         return res.status(200).json({
                             success: true,
                             message: "You liked your own post.",
@@ -120,7 +120,7 @@ router.post("/like-post", (req, res) => {
                     // Fetch the username of the user who liked the post
                     const getUserNameQuery = "SELECT username FROM users WHERE id = ?";
 
-                    db.query(getUserNameQuery, [userId], (err, userResult) => {
+                    db.query(getUserNameQuery, [currentUserId], (err, userResult) => {
                         if (err) {
                             return res.status(500).json({
                                 success: false,
@@ -140,7 +140,7 @@ router.post("/like-post", (req, res) => {
 
                         // Create a notification for the post's author
                         const notificationMessage = `liked your post.`;
-                        createNotification(postAuthorId, userId, "like", notificationMessage, postId)
+                        createNotification(postAuthorId, currentUserId, "like", notificationMessage, postId)
                             .then(() => {
                                 emitUnreadNotificationCount(postAuthorId);
                                 emitNotifications(postAuthorId, notificationMessage);
@@ -178,10 +178,11 @@ router.post("/like-post", (req, res) => {
 });
 
 // Comment on Post
-router.post("/comment", (req, res) => {
-    const { userId, postId, comment } = req.body;
+router.post("/submit-post-comment", (req, res) => {
+    const currentUserId = req.headers["x-current-user-id"];
+    const { postId, comment } = req.body;
 
-    if (!userId || !postId || !comment) {
+    if (!currentUserId || !postId || !comment) {
         return res.status(400).json({
             success: false,
             error: "User ID, Post ID, and Comment content are required.",
@@ -191,7 +192,7 @@ router.post("/comment", (req, res) => {
 
     const insertCommentQuery = "INSERT INTO comments (user_id, post_id, content, created_at) VALUES (?, ?, ?, NOW())";
 
-    db.query(insertCommentQuery, [userId, postId, comment], (err, result) => {
+    db.query(insertCommentQuery, [currentUserId, postId, comment], (err, result) => {
         if (err) {
             return res.status(500).json({
                 success: false,
@@ -223,7 +224,7 @@ router.post("/comment", (req, res) => {
             }
 
             // Check if the user is commenting on their own post
-            if (userId === postAuthorId) {
+            if (currentUserId === postAuthorId) {
                 return res.status(200).json({
                     success: true,
                     message: "You commented on your own post.",
@@ -233,7 +234,7 @@ router.post("/comment", (req, res) => {
 
             // Create a notification for the post's author, including the comment text and comment ID
             const notificationMessage = `commented on your post: "${comment}"`; // Include the comment content in the notification
-            createNotification(postAuthorId, userId, "comment", notificationMessage, postId, commentId)
+            createNotification(postAuthorId, currentUserId, "comment", notificationMessage, postId, commentId)
                 .then(() => {
                     emitUnreadNotificationCount(postAuthorId);
                     res.status(201).json({
@@ -255,10 +256,10 @@ router.post("/comment", (req, res) => {
 
 // Delete Comment
 router.delete("/delete-comment", (req, res) => {
-    const userId = req.headers["x-current-user-id"];
+    const currentUserId = req.headers["x-current-user-id"];
     const { commentId } = req.body;
 
-    if (!userId || !commentId) {
+    if (!currentUserId || !commentId) {
         return res.status(400).json({
             success: false,
             error: "User ID and Comment ID are required.",
@@ -286,9 +287,9 @@ router.delete("/delete-comment", (req, res) => {
 
         const commentOwnerId = commentResult[0].user_id;
 
-        console.log(commentOwnerId, userId);
+        console.log(commentOwnerId, currentUserId);
 
-        if (commentOwnerId != userId) {
+        if (commentOwnerId != currentUserId) {
             return res.status(403).json({
                 success: false,
                 error: "You are not authorized to delete this comment.",
@@ -317,15 +318,15 @@ router.delete("/delete-comment", (req, res) => {
 
 // Save Post
 router.post("/save-post", (req, res) => {
-    const userId = req.headers["x-current-user-id"];
+    const currentUserId = req.headers["x-current-user-id"];
 
     const { postId } = req.body;
 
     // Validate the input
-    if (!userId || !postId) {
+    if (!currentUserId || !postId) {
         return res.status(400).json({
             success: false,
-            error: "userId and postId are required.",
+            error: "currentUserId and postId are required.",
             data: null,
         });
     }
@@ -335,7 +336,7 @@ router.post("/save-post", (req, res) => {
         SELECT 1 FROM saved_posts WHERE user_id = ? AND post_id = ?
     `;
 
-    db.query(checkSavedPostQuery, [userId, postId], (err, result) => {
+    db.query(checkSavedPostQuery, [currentUserId, postId], (err, result) => {
         if (err) {
             return res.status(500).json({
                 success: false,
@@ -350,7 +351,7 @@ router.post("/save-post", (req, res) => {
                 DELETE FROM saved_posts WHERE user_id = ? AND post_id = ?
             `;
 
-            db.query(deleteSavedPostQuery, [userId, postId], (err, result) => {
+            db.query(deleteSavedPostQuery, [currentUserId, postId], (err, result) => {
                 if (err) {
                     return res.status(500).json({
                         success: false,
@@ -374,7 +375,7 @@ router.post("/save-post", (req, res) => {
                 INSERT INTO saved_posts (user_id, post_id) VALUES (?, ?)
             `;
 
-            db.query(insertSavedPostQuery, [userId, postId], (err, result) => {
+            db.query(insertSavedPostQuery, [currentUserId, postId], (err, result) => {
                 if (err) {
                     return res.status(500).json({
                         success: false,
@@ -701,9 +702,10 @@ router.post("/update/:postId", (req, res) => {
 
 // Delete Post
 router.delete("/delete-post", (req, res) => {
-    const { userId, postId } = req.query;
+    const currentUserId = req.headers["x-current-user-id"];
+    const { postId } = req.query;
 
-    if (!userId) {
+    if (!currentUserId) {
         return res.status(400).json({
             success: false,
             error: "User ID is required to delete the post",
@@ -713,7 +715,7 @@ router.delete("/delete-post", (req, res) => {
 
     const checkOwnershipQuery = "SELECT * FROM posts WHERE id = ? AND user_id = ?";
 
-    db.query(checkOwnershipQuery, [postId, userId], (err, result) => {
+    db.query(checkOwnershipQuery, [postId, currentUserId], (err, result) => {
         if (err) {
             return res.status(500).json({
                 success: false,
@@ -753,7 +755,7 @@ router.delete("/delete-post", (req, res) => {
 
 // Fetch Saved Posts
 router.get(["/fetch-saved-posts"], (req, res) => {
-    const userId = req.headers["x-current-user-id"];
+    const currentUserId = req.headers["x-current-user-id"];
 
     let savedPostsQuery = `
         SELECT u.username,
@@ -768,7 +770,7 @@ router.get(["/fetch-saved-posts"], (req, res) => {
         ORDER BY p.created_at DESC;
     `;
 
-    db.query(savedPostsQuery, [userId], (err, result) => {
+    db.query(savedPostsQuery, [currentUserId], (err, result) => {
         if (err) {
             return res.status(500).json({
                 success: false,
@@ -805,8 +807,8 @@ router.get(["/fetch-saved-posts"], (req, res) => {
                 return acc;
             }, {});
 
-            // If userId is provided, fetch liked posts by the current user
-            if (userId) {
+            // If currentUserId is provided, fetch liked posts by the current user
+            if (currentUserId) {
                 let likedPostsQuery = `
                     SELECT post_id
                     FROM likes
@@ -814,7 +816,7 @@ router.get(["/fetch-saved-posts"], (req, res) => {
                     AND post_id IN (?);
                 `;
 
-                db.query(likedPostsQuery, [userId, postIds], (err, likedPostsResult) => {
+                db.query(likedPostsQuery, [currentUserId, postIds], (err, likedPostsResult) => {
                     if (err) {
                         return res.status(500).json({
                             success: false,
@@ -834,7 +836,7 @@ router.get(["/fetch-saved-posts"], (req, res) => {
                         // Set the like count
                         post.like_count = likeCounts[post.id] || 0;
 
-                        // If userId is provided, check if the current user liked the post
+                        // If currentUserId is provided, check if the current user liked the post
                         post.liked_by_current_user = likedPostsByCurrentUser.has(post.id) ? 1 : 0;
                     });
 
@@ -881,7 +883,7 @@ router.get(["/fetch-saved-posts"], (req, res) => {
                     });
                 });
             } else {
-                // If no userId is provided, simply return the posts with like counts
+                // If no currentUserId is provided, simply return the posts with like counts
                 result.forEach((post) => {
                     post.like_count = likeCounts[post.id] || 0;
                 });

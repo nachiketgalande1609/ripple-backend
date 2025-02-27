@@ -3,12 +3,12 @@ const db = require("../db");
 const router = express.Router();
 
 router.patch("/update-account-privacy", (req, res) => {
-    const userId = req.headers["x-current-user-id"];
+    const currentUserId = req.headers["x-current-user-id"];
     const { isPrivate } = req.body;
 
     query = "UPDATE users SET is_private=? WHERE id=?";
 
-    db.query(query, [isPrivate, userId], (updateErr) => {
+    db.query(query, [isPrivate, currentUserId], (updateErr) => {
         if (updateErr) {
             return res.status(500).json({
                 success: false,

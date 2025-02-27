@@ -19,9 +19,9 @@ const s3 = new S3Client({
 });
 
 router.get("/fetch-user-stories", async (req, res) => {
-    const userId = req.headers["x-current-user-id"];
+    const currentUserId = req.headers["x-current-user-id"];
 
-    if (!userId) {
+    if (!currentUserId) {
         return res.status(400).json({
             success: false,
             error: "User ID is required.",
@@ -29,8 +29,8 @@ router.get("/fetch-user-stories", async (req, res) => {
         });
     }
 
-    // Convert userId to a number for consistent comparison
-    const numericUserId = parseInt(userId, 10);
+    // Convert currentUserId to a number for consistent comparison
+    const numericUserId = parseInt(currentUserId, 10);
     if (isNaN(numericUserId)) {
         return res.status(400).json({
             success: false,

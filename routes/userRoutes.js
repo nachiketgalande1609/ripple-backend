@@ -147,11 +147,11 @@ router.post("/update-profile-picture", upload.single("profile_pic"), async (req,
 });
 
 router.put("/profile/update-profile-details", async (req, res) => {
-    const userId = req.headers["x-current-user-id"];
+    const currentUserId = req.headers["x-current-user-id"];
     const { updatedProfile } = req.body;
 
     // Validate required fields
-    if (!userId || !updatedProfile) {
+    if (!currentUserId || !updatedProfile) {
         return res.status(400).json({
             success: false,
             error: "Nothing to update",
@@ -188,7 +188,7 @@ router.put("/profile/update-profile-details", async (req, res) => {
         query = query.slice(0, -2);
 
         query += " WHERE id = ?";
-        values.push(userId);
+        values.push(currentUserId);
 
         // Execute the query with the provided parameters
         const [result] = await db.promise().query(query, values);
@@ -202,7 +202,9 @@ router.put("/profile/update-profile-details", async (req, res) => {
         }
 
         // Fetch the updated user data
-        const [updatedUserResults] = await db.promise().query("SELECT id, username, email, bio, profile_picture FROM users WHERE id = ?", [userId]);
+        const [updatedUserResults] = await db
+            .promise()
+            .query("SELECT id, username, email, bio, profile_picture FROM users WHERE id = ?", [currentUserId]);
 
         const updatedUser = updatedUserResults[0];
 

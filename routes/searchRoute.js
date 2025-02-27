@@ -52,7 +52,7 @@ router.get("/search-users", (req, res) => {
 });
 
 router.get("/fetch-search-history", (req, res) => {
-    const userId = req.headers["x-current-user-id"];
+    const currentUserId = req.headers["x-current-user-id"];
 
     const query = `
     SELECT 
@@ -68,7 +68,7 @@ router.get("/fetch-search-history", (req, res) => {
     ORDER BY sh.created_at DESC
     LIMIT 20`;
 
-    db.query(query, [userId], (err, results) => {
+    db.query(query, [currentUserId], (err, results) => {
         if (err) return res.status(500).json({ error: err.message });
         res.json({ data: results });
     });
@@ -77,16 +77,16 @@ router.get("/fetch-search-history", (req, res) => {
 // Add to search history when user is clicked
 router.post("/update-search-history", (req, res) => {
     const { target_user_id } = req.body;
-    const userId = req.headers["x-current-user-id"];
+    const currentUserId = req.headers["x-current-user-id"];
 
     if (!target_user_id) {
         return res.status(400).json({ error: "Target user ID is required" });
     }
 
-    db.query("DELETE FROM search_history WHERE user_id = ? AND target_user_id = ?", [userId, target_user_id], (deleteErr) => {
+    db.query("DELETE FROM search_history WHERE user_id = ? AND target_user_id = ?", [currentUserId, target_user_id], (deleteErr) => {
         if (deleteErr) return res.status(500).json({ error: deleteErr.message });
 
-        db.query("INSERT INTO search_history (user_id, target_user_id) VALUES (?, ?)", [userId, target_user_id], (insertErr) => {
+        db.query("INSERT INTO search_history (user_id, target_user_id) VALUES (?, ?)", [currentUserId, target_user_id], (insertErr) => {
             if (insertErr) return res.status(500).json({ error: insertErr.message });
             res.json({ success: true });
         });
@@ -94,14 +94,14 @@ router.post("/update-search-history", (req, res) => {
 });
 
 router.delete("/delete-search-history", (req, res) => {
-    const userId = req.headers["x-current-user-id"];
+    const currentUserId = req.headers["x-current-user-id"];
     const { historyId } = req.query;
 
     const query = `
     DELETE FROM search_history 
     WHERE id = ? AND user_id = ?`;
 
-    db.query(query, [historyId, userId], (err, result) => {
+    db.query(query, [historyId, currentUserId], (err, result) => {
         if (err) return res.status(500).json({ success: false, error: err.message });
         if (result.affectedRows === 0) return res.status(404).json({ success: false });
         res.status(200).json({ success: true });
