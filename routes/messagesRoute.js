@@ -219,7 +219,7 @@ router.post("/send-media", upload.single("image"), async (req, res) => {
 
 // Delete Message
 router.delete("/delete-message", async (req, res) => {
-    const { currentUserId, messageId } = req.query;
+    const { messageId } = req.query;
 
     if (!messageId) {
         return res.status(400).json({

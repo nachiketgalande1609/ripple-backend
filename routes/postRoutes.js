@@ -253,8 +253,9 @@ router.post("/comment", (req, res) => {
 });
 
 // Delete Comment
-router.delete("/comment", (req, res) => {
-    const { userId, commentId } = req.body;
+router.delete("/delete-comment", (req, res) => {
+    const userId = req.headers["x-current-user-id"];
+    const { commentId } = req.body;
 
     if (!userId || !commentId) {
         return res.status(400).json({
@@ -283,7 +284,10 @@ router.delete("/comment", (req, res) => {
         }
 
         const commentOwnerId = commentResult[0].user_id;
-        if (commentOwnerId !== userId) {
+
+        console.log(commentOwnerId, userId);
+
+        if (commentOwnerId != userId) {
             return res.status(403).json({
                 success: false,
                 error: "You are not authorized to delete this comment.",
@@ -311,8 +315,10 @@ router.delete("/comment", (req, res) => {
 });
 
 // Save Post
-router.post("/save", (req, res) => {
-    const { userId, postId } = req.body;
+router.post("/save-post", (req, res) => {
+    const userId = req.headers["x-current-user-id"];
+
+    const { postId } = req.body;
 
     // Validate the input
     if (!userId || !postId) {
@@ -490,7 +496,8 @@ router.get("/fetch-posts", async (req, res) => {
 
 // Fetch Profile Page Posts
 router.get(["/fetch-profile-posts"], (req, res) => {
-    const { currentUserId, userId } = req.query;
+    const currentUserId = req.headers["x-current-user-id"];
+    const { userId } = req.query;
 
     // Query to check if the user is private
     const privacyQuery = `
@@ -744,8 +751,8 @@ router.delete("/delete-post", (req, res) => {
 });
 
 // Fetch Saved Posts
-router.get(["/saved"], (req, res) => {
-    const { userId } = req.params.userId ? req.params : req.query;
+router.get(["/fetch-saved-posts"], (req, res) => {
+    const userId = req.headers["x-current-user-id"];
 
     let savedPostsQuery = `
         SELECT u.username,

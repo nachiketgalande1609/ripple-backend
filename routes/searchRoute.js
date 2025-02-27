@@ -93,7 +93,8 @@ router.post("/update-search-history", (req, res) => {
 });
 
 router.delete("/delete-search-history", (req, res) => {
-    const { userId, historyId } = req.query;
+    const userId = req.headers["x-current-user-id"];
+    const { historyId } = req.query;
 
     const query = `
     DELETE FROM search_history 
