@@ -158,9 +158,9 @@ router.post("/response", async (req, res) => {
     }
 });
 
-router.get("/following/:userId", async (req, res) => {
+router.get("/fetch-following-list", async (req, res) => {
     try {
-        const { userId } = req.params;
+        const { userId } = req.query;
 
         const query = `
             SELECT u.id, u.username, u.profile_picture

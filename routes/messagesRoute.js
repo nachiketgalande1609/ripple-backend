@@ -25,8 +25,8 @@ const s3 = new S3Client({
 });
 
 // Get all messages and users for the current user
-router.get("/:currentUserId", (req, res) => {
-    const { currentUserId } = req.params;
+router.get("/fetch-users-messages", (req, res) => {
+    const { currentUserId } = req.query;
 
     // Fetch users the current user has messaged with, excluding the current user
     db.query(
@@ -129,7 +129,7 @@ router.get("/:currentUserId", (req, res) => {
     );
 });
 
-router.post("/media", upload.single("image"), async (req, res) => {
+router.post("/send-media", upload.single("image"), async (req, res) => {
     const file = req.file;
 
     if (!file) {
