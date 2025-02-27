@@ -19,7 +19,7 @@ const s3 = new S3Client({
 });
 
 router.get("/fetch-user-stories", async (req, res) => {
-    const { userId } = req.query;
+    const userId = req.headers["x-current-user-id"];
 
     if (!userId) {
         return res.status(400).json({

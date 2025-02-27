@@ -392,7 +392,7 @@ router.post("/save", (req, res) => {
 // Fetch Home Page Posts
 router.get("/fetch-posts", async (req, res) => {
     try {
-        const { userId } = req.query;
+        const userId = req.headers["x-current-user-id"];
 
         let postsQuery = `
             SELECT u.username,

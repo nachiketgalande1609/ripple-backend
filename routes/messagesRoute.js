@@ -26,7 +26,7 @@ const s3 = new S3Client({
 
 // Get all messages and users for the current user
 router.get("/fetch-users-messages", (req, res) => {
-    const { currentUserId } = req.query;
+    const currentUserId = req.headers["x-current-user-id"];
 
     // Fetch users the current user has messaged with, excluding the current user
     db.query(

@@ -160,7 +160,7 @@ router.post("/response", async (req, res) => {
 
 router.get("/fetch-following-list", async (req, res) => {
     try {
-        const { userId } = req.query;
+        const userId = req.headers["x-current-user-id"];
 
         const query = `
             SELECT u.id, u.username, u.profile_picture
