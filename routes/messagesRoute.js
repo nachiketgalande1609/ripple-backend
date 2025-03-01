@@ -117,6 +117,7 @@ router.get("/fetch-messages", (req, res) => {
                 groupedMessages[chatPartnerId].push({
                     message_id: msg.message_id,
                     sender_id: msg.sender_id,
+                    receiver_id: msg.receiver_id,
                     message_text: msg.message_text,
                     file_url: msg.file_url,
                     timestamp: msg.timestamp,
