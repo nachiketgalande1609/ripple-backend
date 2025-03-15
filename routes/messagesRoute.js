@@ -75,8 +75,9 @@ router.get("/fetch-users", (req, res) => {
 router.get("/fetch-messages", (req, res) => {
     const currentUserId = req.headers["x-current-user-id"];
     const selectedUserId = req.query.selectedUserId;
+    const limit = parseInt(req.query.limit) || 20; // Default limit to 20 messages
+    const offset = parseInt(req.query.offset) || 0; // Default offset to 0
 
-    // Fetch all messages where the user is either sender or receiver
     db.query(
         `
         SELECT 
@@ -93,9 +94,10 @@ router.get("/fetch-messages", (req, res) => {
         LEFT JOIN posts p ON m.post_id = p.id
         LEFT JOIN users u ON p.user_id = u.id
         WHERE (m.sender_id = ? AND m.receiver_id = ?) OR (m.sender_id = ? AND m.receiver_id = ?)
-        ORDER BY m.timestamp ASC;
+        ORDER BY m.timestamp DESC
+        LIMIT ? OFFSET ?;
     `,
-        [currentUserId, selectedUserId, selectedUserId, currentUserId],
+        [currentUserId, selectedUserId, selectedUserId, currentUserId, limit, offset],
         (messagesErr, messagesResults) => {
             if (messagesErr) {
                 return res.status(500).json({
