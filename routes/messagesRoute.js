@@ -94,7 +94,7 @@ router.get("/fetch-messages", (req, res) => {
         LEFT JOIN posts p ON m.post_id = p.id
         LEFT JOIN users u ON p.user_id = u.id
         WHERE (m.sender_id = ? AND m.receiver_id = ?) OR (m.sender_id = ? AND m.receiver_id = ?)
-        ORDER BY m.timestamp DESC
+        ORDER BY m.timestamp DESC, m.message_id DESC
         LIMIT ? OFFSET ?;
     `,
         [currentUserId, selectedUserId, selectedUserId, currentUserId, limit, offset],
