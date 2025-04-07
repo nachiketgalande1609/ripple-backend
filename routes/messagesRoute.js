@@ -133,6 +133,7 @@ router.get("/fetch-messages", (req, res) => {
                     media_width: msg.media_width,
                     media_height: msg.media_height,
                     reactions: msg.reactions,
+                    saved: true,
                     post: msg.post_id
                         ? {
                               post_id: msg.post_id,
