@@ -50,6 +50,7 @@ router.get("/fetch-user-stories", async (req, res) => {
                         'view_id', v.id,
                         'viewer_id', v.user_id,
                         'viewer_username', viewer.username,
+                        'viewer_profile_picture', viewer.profile_picture,
                         'viewed_at', v.viewed_at
                     )
                 ) AS viewers
@@ -59,8 +60,8 @@ router.get("/fetch-user-stories", async (req, res) => {
             LEFT JOIN story_views v ON s.id = v.story_id
             LEFT JOIN users viewer ON v.user_id = viewer.id
             WHERE (f.follower_id = ? OR s.user_id = ?)
-              AND s.is_active = 1
-              AND (s.expires_at IS NULL OR s.expires_at > NOW())
+            AND s.is_active = 1
+            AND (s.expires_at IS NULL OR s.expires_at > NOW())
             GROUP BY s.id, u.id
             ORDER BY s.created_at DESC
         `;
