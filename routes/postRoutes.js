@@ -408,10 +408,13 @@ router.get("/fetch-posts", async (req, res) => {
                 p.*,
                 IF(sp.user_id IS NOT NULL, 1, 0) AS saved_by_current_user
             FROM posts p
-            INNER JOIN users u ON p.user_id = u.id
-            LEFT JOIN followers f ON p.user_id = f.following_id
+            JOIN users u ON p.user_id = u.id
             LEFT JOIN saved_posts sp ON p.id = sp.post_id AND sp.user_id = ?
-            WHERE f.follower_id = ? OR p.user_id = ?
+            WHERE p.user_id IN (
+                SELECT following_id FROM followers WHERE follower_id = ?
+                UNION
+                SELECT ?
+            )
             ORDER BY p.created_at DESC;
         `;
 
