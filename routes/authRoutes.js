@@ -71,7 +71,7 @@ router.post("/register", async (req, res) => {
                 `Click the link to verify your account: ${verificationLink}`,
                 `
                 <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #ddd; border-radius: 10px; background-color: #f9f9f9;">
-                    <h2 style="color: #333;">Welcome to Our Platform, ${username}!</h2>
+                    <h2 style="color: #333;">Welcome to Ripple, ${username}!</h2>
                     <p style="font-size: 16px; color: #555;">
                         Thank you for registering. Please verify your email address to activate your account.
                     </p>
