@@ -287,8 +287,6 @@ router.delete("/delete-comment", (req, res) => {
 
         const commentOwnerId = commentResult[0].user_id;
 
-        console.log(commentOwnerId, currentUserId);
-
         if (commentOwnerId != currentUserId) {
             return res.status(403).json({
                 success: false,

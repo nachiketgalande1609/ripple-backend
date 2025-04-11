@@ -3,6 +3,7 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const db = require("../db");
 const router = express.Router();
+const { sendEmail } = require("../utils/mailer");
 
 const { OAuth2Client } = require("google-auth-library");
 const client = new OAuth2Client("702353220748-2lmc03lb4tcfnuqds67h8bbupmb1aa0q.apps.googleusercontent.com");
@@ -42,12 +43,18 @@ router.post("/register", async (req, res) => {
             }
         }
 
-        // Insert the new user into the database
+        const verificationToken = jwt.sign({ email }, process.env.JWT_SECRET, {
+            expiresIn: "1h",
+        });
+
+        const tokenExpiry = new Date(Date.now() + 60 * 60 * 1000);
+
         const insertQuery = `
-            INSERT INTO users (username, email, password, public_key, encrypted_private_key)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO users (username, email, password, verification_token, token_expiry, is_verified)
+            VALUES (?, ?, ?, ?, ?, NULL)
         `;
-        db.query(insertQuery, [username, email, hashedPassword, publicKey, encryptedPrivateKey], async (err, result) => {
+
+        db.query(insertQuery, [username, email, hashedPassword, verificationToken, tokenExpiry], async (err, result) => {
             if (err) {
                 return res.status(500).json({
                     success: false,
@@ -56,31 +63,20 @@ router.post("/register", async (req, res) => {
                 });
             }
 
-            // Create a JWT token after registration
-            const user = {
-                id: result.insertId,
-                username,
-                email,
-                publicKey,
-                encryptedPrivateKey,
-            };
-            const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, {
-                expiresIn: "1h",
-            });
+            const verificationLink = `${process.env.FRONTEND_URL}/verify-account?token=${verificationToken}`;
 
-            res.status(201).json({
+            await sendEmail(
+                email,
+                "Verify your account",
+                `Click the link to verify your account: ${verificationLink}`,
+                `<p>Click the link to verify your account:</p><a href="${verificationLink}">${verificationLink}</a>`
+            );
+
+            return res.status(201).json({
                 success: true,
                 error: null,
                 data: {
-                    message: "User registered successfully",
-                    token,
-                    user: {
-                        id: user.id,
-                        username: user.username,
-                        email: user.email,
-                        publicKey: user.publicKey,
-                        encryptedPrivateKey: user.encryptedPrivateKey,
-                    },
+                    message: "User registered successfully. Please check your email to verify your account.",
                 },
             });
         });
@@ -91,9 +87,8 @@ router.post("/register", async (req, res) => {
 router.post("/login", (req, res) => {
     const { email, password } = req.body;
 
-    // Step 1: Fetch user details including the encrypted private key
     const query = `
-        SELECT id, username, email, password, profile_picture, is_private, encrypted_private_key
+        SELECT id, username, email, password, profile_picture, is_private, is_verified
         FROM users
         WHERE email = ?
     `;
@@ -109,7 +104,14 @@ router.post("/login", (req, res) => {
 
         const user = results[0];
 
-        // Step 2: Verify the password
+        if (!user.is_verified) {
+            return res.status(403).json({
+                success: false,
+                error: "Please verify your email before logging in.",
+                data: null,
+            });
+        }
+
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) {
             return res.status(400).json({
@@ -119,10 +121,8 @@ router.post("/login", (req, res) => {
             });
         }
 
-        // Step 3: Generate a JWT token
         const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, { expiresIn: "1h" });
 
-        // Step 4: Return the token, user details, and encrypted private key
         res.json({
             success: true,
             error: null,
@@ -135,7 +135,6 @@ router.post("/login", (req, res) => {
                     profile_picture_url: user.profile_picture,
                     is_private: user.is_private,
                 },
-                encryptedPrivateKey: user.encrypted_private_key, // Include the encrypted private key
             },
         });
     });
@@ -244,5 +243,68 @@ const sendResponse = (user, res) => {
         },
     });
 };
+
+router.get("/verify", (req, res) => {
+    const { token } = req.query;
+
+    if (!token) {
+        return res.status(400).json({
+            success: false,
+            error: "Invalid verification link.",
+            data: null,
+        });
+    }
+
+    const query = "SELECT * FROM users WHERE verification_token = ?";
+
+    db.query(query, [token], (err, results) => {
+        if (err) {
+            return res.status(500).json({
+                success: false,
+                error: "Database error.",
+                data: null,
+            });
+        }
+
+        if (results.length === 0) {
+            return res.status(400).json({
+                success: false,
+                error: "Invalid or expired token.",
+                data: null,
+            });
+        }
+
+        const user = results[0];
+
+        // ⏳ Check token expiry manually
+        const now = new Date();
+        const expiry = new Date(user.token_expiry);
+
+        if (now > expiry) {
+            return res.status(400).json({
+                success: false,
+                error: "Token has expired. Please register again.",
+                data: null,
+            });
+        }
+
+        const update = "UPDATE users SET is_verified = true WHERE id = ?";
+        db.query(update, [results[0].id], (err2) => {
+            if (err2) {
+                return res.status(500).json({
+                    success: false,
+                    error: "Failed to verify account.",
+                    data: null,
+                });
+            }
+
+            res.json({
+                success: true,
+                error: null,
+                data: "Account successfully verified! You can now log in.",
+            });
+        });
+    });
+});
 
 module.exports = router;
