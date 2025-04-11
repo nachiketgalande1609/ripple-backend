@@ -69,7 +69,29 @@ router.post("/register", async (req, res) => {
                 email,
                 "Verify your account",
                 `Click the link to verify your account: ${verificationLink}`,
-                `<p>Click the link to verify your account:</p><a href="${verificationLink}">${verificationLink}</a>`
+                `
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #ddd; border-radius: 10px; background-color: #f9f9f9;">
+                    <h2 style="color: #333;">Welcome to Our Platform, ${username}!</h2>
+                    <p style="font-size: 16px; color: #555;">
+                        Thank you for registering. Please verify your email address to activate your account.
+                    </p>
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="${verificationLink}" style="background-color: #4CAF50; color: white; padding: 12px 25px; text-decoration: none; font-size: 16px; border-radius: 5px;">
+                            Verify Account
+                        </a>
+                    </div>
+                    <p style="font-size: 14px; color: #999;">
+                        If the button above doesn't work, copy and paste the following link into your browser:
+                    </p>
+                    <p style="font-size: 14px; color: #007bff; word-break: break-all;">${verificationLink}</p>
+                    <p style="font-size: 14px; color: #999;">
+                        This link will expire in 1 hour.
+                    </p>
+                    <p style="font-size: 14px; color: #bbb; border-top: 1px solid #eee; padding-top: 15px;">
+                        If you didn’t create this account, you can safely ignore this email.
+                    </p>
+                </div>
+                `
             );
 
             return res.status(201).json({
