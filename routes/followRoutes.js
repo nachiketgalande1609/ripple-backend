@@ -142,6 +142,8 @@ router.post("/response", async (req, res) => {
                  VALUES (?, ?, 'follow_accepted', ?, NOW())`,
                 [follower_id, following_id, "accepted your follow request."]
             );
+
+            emitUnreadNotificationCount(follower_id);
         }
 
         res.status(200).json({
