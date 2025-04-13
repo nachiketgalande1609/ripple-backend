@@ -9,7 +9,16 @@ const { OAuth2Client } = require("google-auth-library");
 const client = new OAuth2Client("702353220748-2lmc03lb4tcfnuqds67h8bbupmb1aa0q.apps.googleusercontent.com");
 
 router.post("/register", async (req, res) => {
-    const { email, username, password, publicKey, encryptedPrivateKey } = req.body;
+    const { email, username, password } = req.body;
+
+    const usernameRegex = /^[a-zA-Z0-9_]+$/;
+    if (username && !usernameRegex.test(username)) {
+        return res.status(400).json({
+            success: false,
+            error: "Invalid 'username'. It can only contain letters, numbers, and underscores.",
+            data: null,
+        });
+    }
 
     // Hash the password
     const hashedPassword = await bcrypt.hash(password, 10);

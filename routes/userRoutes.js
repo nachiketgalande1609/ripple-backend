@@ -161,6 +161,15 @@ router.put("/profile/update-profile-details", async (req, res) => {
 
     const { username, email, bio, profile_picture_url } = updatedProfile;
 
+    const usernameRegex = /^[a-zA-Z0-9_]+$/;
+    if (username && !usernameRegex.test(username)) {
+        return res.status(400).json({
+            success: false,
+            error: "Invalid 'username'. It can only contain letters, numbers, and underscores.",
+            data: null,
+        });
+    }
+
     try {
         // Prepare the update query with dynamic fields
         let query = "UPDATE users SET ";
