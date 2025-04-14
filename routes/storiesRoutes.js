@@ -126,10 +126,16 @@ router.post("/upload-story", upload.single("media"), async (req, res) => {
     let mediaHeight = null;
     let mediaType = fileType.startsWith("image/") ? "image" : "video";
 
-    // Extract image dimensions only if it's an image
+    let resizedImageBuffer;
+
     if (mediaType === "image") {
         try {
-            const metadata = await sharp(file.buffer).metadata();
+            const image = sharp(file.buffer);
+            image.resize({ width: 1080 });
+
+            resizedImageBuffer = await image.toBuffer();
+            const metadata = await sharp(resizedImageBuffer).metadata();
+
             mediaWidth = metadata.width;
             mediaHeight = metadata.height;
         } catch (err) {
@@ -140,12 +146,14 @@ router.post("/upload-story", upload.single("media"), async (req, res) => {
                 data: null,
             });
         }
+    } else {
+        resizedImageBuffer = file.buffer;
     }
 
     const uploadParams = {
         Bucket: process.env.AWS_S3_BUCKET_NAME,
         Key: `stories/${Date.now()}_${fileName}`,
-        Body: file.buffer,
+        Body: resizedImageBuffer,
         ContentType: fileType,
         ACL: "public-read",
     };

@@ -581,10 +581,15 @@ router.post("/create-post", upload.single("image"), async (req, res) => {
     let mediaWidth = null;
     let mediaHeight = null;
 
-    // Extract image dimensions if the file is an image
+    let resizedImageBuffer;
+
     if (fileType.startsWith("image/")) {
         try {
-            const metadata = await sharp(file.buffer).metadata();
+            const image = sharp(file.buffer);
+            image.resize({ width: 1080 });
+
+            resizedImageBuffer = await image.toBuffer();
+            const metadata = await sharp(resizedImageBuffer).metadata();
             mediaWidth = metadata.width;
             mediaHeight = metadata.height;
         } catch (err) {
@@ -595,12 +600,14 @@ router.post("/create-post", upload.single("image"), async (req, res) => {
                 data: null,
             });
         }
+    } else {
+        resizedImageBuffer = file.buffer;
     }
 
     const uploadParams = {
         Bucket: process.env.AWS_S3_BUCKET_NAME,
         Key: `uploads/${Date.now()}_${fileName}`,
-        Body: file.buffer,
+        Body: resizedImageBuffer,
         ContentType: fileType,
         ACL: "public-read",
     };

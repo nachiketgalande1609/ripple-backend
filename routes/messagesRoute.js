@@ -199,18 +199,44 @@ router.post("/send-media", upload.single("image"), async (req, res) => {
     let mediaWidth = null;
     let mediaHeight = null;
 
+    let resizedMediaBuffer;
+    let tempFilePath;
+
     try {
         if (fileType.startsWith("image/")) {
-            const metadata = await sharp(file.buffer).metadata();
+            const image = sharp(file.buffer);
+            image.resize({ width: 1080 });
+            resizedMediaBuffer = await image.toBuffer();
+
+            const metadata = await sharp(resizedMediaBuffer).metadata();
             mediaWidth = metadata.width;
             mediaHeight = metadata.height;
         } else if (fileType.startsWith("video/")) {
-            // Write buffer to a temp file
-            const tempFilePath = path.join(os.tmpdir(), `${Date.now()}_${fileName}`);
-            fs.writeFileSync(tempFilePath, file.buffer);
+            const tempInputPath = path.join(os.tmpdir(), `${Date.now()}_${fileName}`);
+            fs.writeFileSync(tempInputPath, file.buffer);
+
+            const tempOutputPath = path.join(os.tmpdir(), `resized_${Date.now()}_${fileName}`);
 
             await new Promise((resolve, reject) => {
-                ffmpeg.ffprobe(tempFilePath, (err, metadata) => {
+                ffmpeg(tempInputPath)
+                    .outputOptions([
+                        "-vf",
+                        "scale=720:-2", // maintain aspect ratio
+                        "-preset",
+                        "fast",
+                        "-crf",
+                        "28", // adjust quality/size balance
+                    ])
+                    .output(tempOutputPath)
+                    .on("end", resolve)
+                    .on("error", reject)
+                    .run();
+            });
+
+            resizedMediaBuffer = fs.readFileSync(tempOutputPath);
+
+            await new Promise((resolve, reject) => {
+                ffmpeg.ffprobe(tempOutputPath, (err, metadata) => {
                     if (err) {
                         console.error("Error processing video:", err);
                         reject(err);
@@ -222,8 +248,10 @@ router.post("/send-media", upload.single("image"), async (req, res) => {
                 });
             });
 
-            // Delete the temporary file after processing
-            fs.unlinkSync(tempFilePath);
+            fs.unlinkSync(tempInputPath);
+            fs.unlinkSync(tempOutputPath);
+        } else {
+            resizedMediaBuffer = file.buffer;
         }
     } catch (err) {
         console.error("Error processing media:", err);
@@ -237,7 +265,7 @@ router.post("/send-media", upload.single("image"), async (req, res) => {
     const uploadParams = {
         Bucket: process.env.AWS_S3_BUCKET_NAME,
         Key: `chat/${Date.now()}_${fileName}`,
-        Body: file.buffer,
+        Body: resizedMediaBuffer,
         ContentType: fileType,
         ACL: "public-read",
     };
