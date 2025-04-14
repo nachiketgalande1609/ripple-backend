@@ -4,6 +4,7 @@ const jwt = require("jsonwebtoken");
 const db = require("../db");
 const router = express.Router();
 const { sendEmail } = require("../utils/mailer");
+const crypto = require("crypto");
 
 const { OAuth2Client } = require("google-auth-library");
 const client = new OAuth2Client("702353220748-2lmc03lb4tcfnuqds67h8bbupmb1aa0q.apps.googleusercontent.com");
@@ -333,6 +334,152 @@ router.get("/verify", (req, res) => {
                 success: true,
                 error: null,
                 data: "Account successfully verified! You can now log in.",
+            });
+        });
+    });
+});
+
+router.post("/generate-otp", async (req, res) => {
+    const { email } = req.body;
+
+    // Validate email format
+    if (!email || !/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(email)) {
+        return res.status(400).json({
+            success: false,
+            error: "Invalid email format.",
+            data: null,
+        });
+    }
+
+    // Check if user with that email exists
+    const checkUserQuery = `SELECT id FROM users WHERE email = ?`;
+
+    db.query(checkUserQuery, [email], (err, results) => {
+        if (err) {
+            return res.status(500).json({
+                success: false,
+                error: "Database error while checking user.",
+                data: null,
+            });
+        }
+
+        if (results.length === 0) {
+            return res.status(404).json({
+                success: false,
+                error: "No user found with this email.",
+                data: null,
+            });
+        }
+
+        // Generate OTP (6 digits)
+        const otp = crypto.randomInt(100000, 999999);
+
+        // OTP expires in 10 minutes
+        const expiryTime = new Date(Date.now() + 10 * 60 * 1000);
+
+        const updateOtpQuery = `
+            UPDATE users
+            SET otp = ?, otp_expiry = ?
+            WHERE email = ?
+        `;
+
+        db.query(updateOtpQuery, [otp, expiryTime, email], async (updateErr) => {
+            if (updateErr) {
+                return res.status(500).json({
+                    success: false,
+                    error: "Error saving OTP.",
+                    data: null,
+                });
+            }
+
+            // Send OTP via email
+            const otpMessage = `
+                <div style="font-family: Arial, sans-serif; padding: 20px;">
+                    <h2>Your OTP Code</h2>
+                    <p style="font-size: 18px;">Here is your One-Time Password (OTP): <strong>${otp}</strong></p>
+                    <p style="font-size: 14px;">This code will expire in 10 minutes.</p>
+                    <p style="font-size: 14px;">If you did not request this, please ignore this email.</p>
+                </div>
+            `;
+
+            const otpSubject = "Your OTP Code for Email Verification";
+
+            await sendEmail(email, otpSubject, "", otpMessage);
+
+            return res.json({
+                success: true,
+                error: null,
+                data: "OTP sent successfully. Please check your email.",
+            });
+        });
+    });
+});
+
+// Route to verify OTP entered by user
+router.post("/verify-otp", (req, res) => {
+    const { email, otp } = req.body;
+
+    // Validate OTP input
+    if (!otp || otp.length !== 6) {
+        return res.status(400).json({
+            success: false,
+            error: "Invalid OTP format.",
+            data: null,
+        });
+    }
+
+    // Query the database for the OTP stored
+    const query = `
+        SELECT otp, otp_expiry
+        FROM users
+        WHERE email = ?
+    `;
+
+    db.query(query, [email], (err, results) => {
+        if (err || results.length === 0) {
+            return res.status(400).json({
+                success: false,
+                error: "User not found or OTP not generated.",
+                data: null,
+            });
+        }
+
+        const user = results[0];
+
+        // Check if OTP has expired
+        const now = new Date();
+        if (now > new Date(user.otp_expiry)) {
+            return res.status(400).json({
+                success: false,
+                error: "OTP has expired. Please request a new one.",
+                data: null,
+            });
+        }
+
+        // Check if the OTP matches
+        if (user.otp !== otp) {
+            return res.status(400).json({
+                success: false,
+                error: "Invalid OTP. Please try again.",
+                data: null,
+            });
+        }
+
+        // OTP is valid, update user record
+        const updateQuery = "UPDATE users SET is_verified = true WHERE email = ?";
+        db.query(updateQuery, [email], (err2) => {
+            if (err2) {
+                return res.status(500).json({
+                    success: false,
+                    error: "Error updating user verification status.",
+                    data: null,
+                });
+            }
+
+            res.json({
+                success: true,
+                error: null,
+                data: "Email verified successfully.",
             });
         });
     });
