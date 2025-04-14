@@ -5,6 +5,7 @@ const mysql = require("mysql2");
 const cors = require("cors");
 const http = require("http");
 const { initializeSocket } = require("./socket");
+const authMiddleware = require("./middleware/auth");
 
 dotenv.config();
 
@@ -33,6 +34,9 @@ const messagesRoutes = require("./routes/messagesRoute");
 const storiesRoutes = require("./routes/storiesRoutes");
 
 app.use("/api/auth", authRoutes);
+
+app.use(authMiddleware);
+
 app.use("/api/users", userRoutes);
 app.use("/api/follow", followRoutes);
 app.use("/api/posts", postRoutes);
