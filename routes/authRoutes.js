@@ -394,11 +394,24 @@ router.post("/generate-otp", async (req, res) => {
 
             // Send OTP via email
             const otpMessage = `
-                <div style="font-family: Arial, sans-serif; padding: 20px;">
-                    <h2>Your OTP Code</h2>
-                    <p style="font-size: 18px;">Here is your One-Time Password (OTP): <strong>${otp}</strong></p>
-                    <p style="font-size: 14px;">This code will expire in 10 minutes.</p>
-                    <p style="font-size: 14px;">If you did not request this, please ignore this email.</p>
+                <div style="background-color: #f4f4f7; padding: 40px 0; font-family: Arial, sans-serif;">
+                    <div style="max-width: 600px; margin: auto; background-color: #ffffff; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); padding: 30px;">
+                    <h2 style="text-align: center; color: #333333; margin-bottom: 20px;">Your One-Time Password</h2>
+                    <p style="font-size: 16px; color: #555555; text-align: center;">
+                        Use the code below to complete your authentication. This code is valid for 10 minutes.
+                    </p>
+                    <div style="margin: 30px auto; text-align: center;">
+                        <span style="display: inline-block; font-size: 28px; font-weight: bold; color: #000000; background-color: #f0f0f0; padding: 12px 24px; border-radius: 6px; letter-spacing: 2px;">
+                        ${otp}
+                        </span>
+                    </div>
+                    <p style="font-size: 14px; color: #777777; text-align: center;">
+                        If you did not request this code, please ignore this email.
+                    </p>
+                    </div>
+                    <p style="text-align: center; font-size: 12px; color: #aaaaaa; margin-top: 20px;">
+                    © 2025 Your Company. All rights reserved.
+                    </p>
                 </div>
             `;
 
@@ -482,6 +495,85 @@ router.post("/verify-otp", (req, res) => {
                 data: "Email verified successfully.",
             });
         });
+    });
+});
+
+router.post("/reset-password", async (req, res) => {
+    const { email, otp, password } = req.body;
+
+    if (!email || !otp || !password) {
+        return res.status(400).json({
+            success: false,
+            error: "Missing required fields.",
+            data: null,
+        });
+    }
+
+    const query = `SELECT otp, otp_expiry FROM users WHERE email = ?`;
+
+    db.query(query, [email], async (err, results) => {
+        if (err || results.length === 0) {
+            return res.status(400).json({
+                success: false,
+                error: "User not found or OTP not generated.",
+                data: null,
+            });
+        }
+
+        const user = results[0];
+
+        // Check if OTP expired
+        const now = new Date();
+        if (now > new Date(user.otp_expiry)) {
+            return res.status(400).json({
+                success: false,
+                error: "OTP has expired. Please request a new one.",
+                data: null,
+            });
+        }
+
+        // Validate OTP match
+        if (user.otp !== otp) {
+            return res.status(400).json({
+                success: false,
+                error: "Invalid OTP. Please try again.",
+                data: null,
+            });
+        }
+
+        // Hash the new password
+        try {
+            const hashedPassword = await bcrypt.hash(password, 10);
+
+            const updateQuery = `
+                UPDATE users 
+                SET password = ?, otp = NULL, otp_expiry = NULL 
+                WHERE email = ?
+            `;
+
+            db.query(updateQuery, [hashedPassword, email], (err2) => {
+                if (err2) {
+                    return res.status(500).json({
+                        success: false,
+                        error: "Failed to reset password.",
+                        data: null,
+                    });
+                }
+
+                res.json({
+                    success: true,
+                    error: null,
+                    data: "Password reset successful.",
+                });
+            });
+        } catch (hashError) {
+            console.error("Hashing error:", hashError);
+            return res.status(500).json({
+                success: false,
+                error: "Internal error while resetting password.",
+                data: null,
+            });
+        }
     });
 });
 
