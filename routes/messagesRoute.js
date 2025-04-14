@@ -85,7 +85,7 @@ router.get("/fetch-users", (req, res) => {
                 });
             }
 
-            res.json({
+            return res.json({
                 success: true,
                 data: usersResults,
                 error: null,
@@ -173,9 +173,9 @@ router.get("/fetch-messages", (req, res) => {
                 });
             });
 
-            res.json({
+            return res.json({
                 success: true,
-                data: groupedMessages[selectedUserId] || [], // Return messages for the selected user
+                data: groupedMessages[selectedUserId] || [],
                 error: null,
             });
         }

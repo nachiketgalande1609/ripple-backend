@@ -155,7 +155,7 @@ router.post("/login", (req, res) => {
 
         const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, { expiresIn: "1h" });
 
-        res.json({
+        return res.json({
             success: true,
             error: null,
             data: {
@@ -330,7 +330,7 @@ router.get("/verify", (req, res) => {
                 });
             }
 
-            res.json({
+            return res.json({
                 success: true,
                 error: null,
                 data: "Account successfully verified! You can now log in.",
@@ -489,7 +489,7 @@ router.post("/verify-otp", (req, res) => {
                 });
             }
 
-            res.json({
+            return res.json({
                 success: true,
                 error: null,
                 data: "Email verified successfully.",
@@ -560,7 +560,7 @@ router.post("/reset-password", async (req, res) => {
                     });
                 }
 
-                res.json({
+                return res.json({
                     success: true,
                     error: null,
                     data: "Password reset successful.",

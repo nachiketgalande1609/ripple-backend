@@ -70,7 +70,7 @@ router.get("/fetch-search-history", (req, res) => {
 
     db.query(query, [currentUserId], (err, results) => {
         if (err) return res.status(500).json({ error: err.message });
-        res.json({ data: results });
+        return res.json({ data: results });
     });
 });
 
@@ -88,7 +88,7 @@ router.post("/update-search-history", (req, res) => {
 
         db.query("INSERT INTO search_history (user_id, target_user_id) VALUES (?, ?)", [currentUserId, target_user_id], (insertErr) => {
             if (insertErr) return res.status(500).json({ error: insertErr.message });
-            res.json({ success: true });
+            return res.json({ success: true });
         });
     });
 });
