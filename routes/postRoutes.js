@@ -806,7 +806,17 @@ router.get(["/fetch-saved-posts"], (req, res) => {
             });
         }
 
-        let likesQuery = `SELECT post_id, COUNT(*) AS like_count FROM likes WHERE post_id IN (?) GROUP BY post_id;`;
+        let likesQuery = `
+            SELECT 
+                post_id, 
+                COUNT(*) AS like_count
+            FROM 
+                likes
+            WHERE 
+                post_id IN (?)
+            GROUP BY 
+                post_id;
+        `;
 
         db.query(likesQuery, [postIds], (err, likesResult) => {
             if (err) {
@@ -826,10 +836,13 @@ router.get(["/fetch-saved-posts"], (req, res) => {
             // If currentUserId is provided, fetch liked posts by the current user
             if (currentUserId) {
                 let likedPostsQuery = `
-                    SELECT post_id
-                    FROM likes
-                    WHERE user_id = ?
-                    AND post_id IN (?);
+                    SELECT 
+                        post_id
+                    FROM 
+                        likes
+                    WHERE 
+                        user_id = ? 
+                        AND post_id IN (?);
                 `;
 
                 db.query(likedPostsQuery, [currentUserId, postIds], (err, likedPostsResult) => {
@@ -858,15 +871,33 @@ router.get(["/fetch-saved-posts"], (req, res) => {
 
                     // Fetch comments for each post
                     let commentsQuery = `
-                        SELECT c.id, c.post_id, c.user_id, c.content, c.parent_comment_id, c.created_at, c.updated_at, 
-                               u.username AS commenter_username, u.profile_picture AS commenter_profile_picture
-                        FROM comments c
-                        INNER JOIN users u ON c.user_id = u.id
-                        WHERE c.post_id IN (?)
-                        ORDER BY c.created_at DESC;
+                        SELECT 
+                            c.id, 
+                            c.post_id, 
+                            c.user_id, 
+                            c.content, 
+                            c.parent_comment_id, 
+                            c.created_at, 
+                            c.updated_at,
+                            u.username AS commenter_username, 
+                            u.profile_picture AS commenter_profile_picture,
+                            COUNT(cl.id) AS likes_count,
+                            MAX(CASE WHEN cl.user_id = ? THEN 1 ELSE 0 END) AS liked_by_user
+                        FROM 
+                            comments c
+                        INNER JOIN 
+                            users u ON c.user_id = u.id
+                        LEFT JOIN 
+                            comment_likes cl ON c.id = cl.comment_id
+                        WHERE 
+                            c.post_id IN (?)
+                        GROUP BY 
+                            c.id
+                        ORDER BY 
+                            c.created_at DESC;
                     `;
 
-                    db.query(commentsQuery, [postIds], (err, commentsResult) => {
+                    db.query(commentsQuery, [currentUserId, postIds], (err, commentsResult) => {
                         if (err) {
                             return res.status(500).json({
                                 success: false,
@@ -916,11 +947,18 @@ router.get(["/fetch-saved-posts"], (req, res) => {
 
 function fetchPosts(userId, currentUserId, res) {
     let postsQuery = `
-        SELECT u.username, u.profile_picture, p.* 
-        FROM posts p 
-        INNER JOIN users u ON p.user_id = u.id 
-        WHERE p.user_id = ? 
-        ORDER BY p.created_at DESC;
+        SELECT
+            u.username,
+            u.profile_picture,
+            p.*
+        FROM
+            posts p
+        INNER JOIN
+            users u ON p.user_id = u.id
+        WHERE
+            p.user_id = ?
+        ORDER BY
+            p.created_at DESC;
     `;
 
     db.query(postsQuery, [userId], (err, result) => {
@@ -943,9 +981,13 @@ function fetchPosts(userId, currentUserId, res) {
         const postIds = result.map((post) => post.id);
 
         let likesQuery = `
-            SELECT post_id, user_id
-            FROM likes
-            WHERE post_id IN (?);
+            SELECT
+                post_id,
+                user_id
+            FROM
+                likes
+            WHERE
+                post_id IN (?);
         `;
 
         db.query(likesQuery, [postIds], (err, likesResult) => {
@@ -980,14 +1022,33 @@ function fetchPosts(userId, currentUserId, res) {
             }
 
             let commentsQuery = `
-                SELECT c.id, c.post_id, c.user_id, c.content, c.parent_comment_id, c.created_at, c.updated_at, u.username AS commenter_username, u.profile_picture AS commenter_profile_picture
-                FROM comments c
-                INNER JOIN users u ON c.user_id = u.id
-                WHERE c.post_id IN (?)
-                ORDER BY c.created_at DESC;
+                SELECT
+                    c.id,
+                    c.post_id,
+                    c.user_id,
+                    c.content,
+                    c.parent_comment_id,
+                    c.created_at,
+                    c.updated_at,
+                    u.username AS commenter_username,
+                    u.profile_picture AS commenter_profile_picture,
+                    COUNT(cl.id) AS likes_count,
+                    MAX(CASE WHEN cl.user_id = ? THEN 1 ELSE 0 END) AS liked_by_user
+                FROM
+                    comments c
+                INNER JOIN
+                    users u ON c.user_id = u.id
+                LEFT JOIN
+                    comment_likes cl ON c.id = cl.comment_id
+                WHERE
+                    c.post_id IN (?)
+                GROUP BY
+                    c.id
+                ORDER BY
+                    c.created_at DESC;
             `;
 
-            db.query(commentsQuery, [postIds], (err, commentsResult) => {
+            db.query(commentsQuery, [userId, postIds], (err, commentsResult) => {
                 if (err) {
                     return res.status(500).json({
                         success: false,
