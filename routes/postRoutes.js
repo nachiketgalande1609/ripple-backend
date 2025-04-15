@@ -192,7 +192,8 @@ router.post("/submit-post-comment", (req, res) => {
         });
     }
 
-    const insertCommentQuery = "INSERT INTO comments (user_id, post_id, content, created_at) VALUES (?, ?, ?, NOW())";
+    const insertCommentQuery =
+        "INSERT INTO comments (user_id, post_id, content, created_at) VALUES (?, ?, ?, CONVERT_TZ(NOW(), 'UTC', 'Asia/Kolkata'))";
 
     db.query(insertCommentQuery, [currentUserId, postId, comment], (err, result) => {
         if (err) {
@@ -240,7 +241,7 @@ router.post("/submit-post-comment", (req, res) => {
                 createNotification(postAuthorId, currentUserId, "comment", notificationMessage, postId, commentId)
                     .then(() => {
                         emitUnreadNotificationCount(postAuthorId);
-                        res.status(201).json({
+                        return res.status(201).json({
                             success: true,
                             message: "Comment added and notification sent successfully.",
                             commentId: result.insertId,
