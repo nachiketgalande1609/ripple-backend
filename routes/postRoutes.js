@@ -776,7 +776,8 @@ router.get(["/fetch-saved-posts"], (req, res) => {
     let savedPostsQuery = `
         SELECT u.username,
             u.profile_picture,
-            p.*
+            p.*,
+            IF(sp.user_id IS NOT NULL, 1, 0) AS saved_by_current_user
         FROM posts p
         INNER JOIN users u
             ON p.user_id = u.id
