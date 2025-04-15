@@ -471,8 +471,6 @@ router.get("/fetch-posts", async (req, res) => {
         `;
         const [commentsResult] = await db.promise().query(commentsQuery, [userId, postIds]);
 
-        console.log("xxx", commentsResult);
-
         // Organize comments by post_id
         const commentsByPostId = commentsResult.reduce((acc, comment) => {
             if (!acc[comment.post_id]) {
@@ -566,11 +564,77 @@ router.get(["/fetch-profile-posts"], (req, res) => {
                 }
 
                 // User is following, so proceed with fetching posts
-                fetchPosts(userId, currentUserId, res);
+                fetchPosts(userId, res);
             });
         } else {
             // User is public, proceed with fetching posts
-            fetchPosts(userId, currentUserId, res);
+            fetchPosts(userId, res);
+        }
+    });
+});
+
+// Fetch Post Details
+router.get(["/fetch-post-details"], (req, res) => {
+    const currentUserId = req.headers["x-current-user-id"];
+    const { userId, postId } = req.query;
+
+    // Query to check if the user is private
+    const privacyQuery = `
+        SELECT is_private 
+        FROM users 
+        WHERE id = ?;
+    `;
+
+    db.query(privacyQuery, [userId], (err, userResult) => {
+        if (err) {
+            return res.status(500).json({
+                success: false,
+                error: err.message,
+                data: null,
+            });
+        }
+
+        if (userResult.length === 0) {
+            return res.status(404).json({
+                success: false,
+                error: "User not found",
+                data: null,
+            });
+        }
+
+        const isPrivate = userResult[0].is_private;
+
+        if (isPrivate && currentUserId != userId) {
+            // Check if the current user is following this private account
+            const followCheckQuery = `
+                SELECT 1 
+                FROM followers 
+                WHERE follower_id = ? AND following_id = ?;
+            `;
+
+            db.query(followCheckQuery, [currentUserId, userId], (err, followResult) => {
+                if (err) {
+                    return res.status(500).json({
+                        success: false,
+                        error: err.message,
+                        data: null,
+                    });
+                }
+
+                if (followResult.length === 0) {
+                    return res.status(403).json({
+                        success: false,
+                        error: "This account is private. You must follow the user to see their posts.",
+                        data: null,
+                    });
+                }
+
+                // User is following, so proceed with fetching posts
+                fetchPostDetails(userId, postId, currentUserId, res);
+            });
+        } else {
+            // User is public, proceed with fetching posts
+            fetchPostDetails(userId, postId, currentUserId, res);
         }
     });
 });
@@ -950,16 +1014,13 @@ router.get(["/fetch-saved-posts"], (req, res) => {
     });
 });
 
-function fetchPosts(userId, currentUserId, res) {
+function fetchPosts(userId, res) {
     let postsQuery = `
         SELECT
-            u.username,
-            u.profile_picture,
-            p.*
+            p.id,
+            p.file_url
         FROM
             posts p
-        INNER JOIN
-            users u ON p.user_id = u.id
         WHERE
             p.user_id = ?
         ORDER BY
@@ -983,7 +1044,49 @@ function fetchPosts(userId, currentUserId, res) {
             });
         }
 
-        const postIds = result.map((post) => post.id);
+        return res.status(200).json({
+            success: true,
+            error: null,
+            data: result,
+        });
+    });
+}
+
+function fetchPostDetails(userId, postId, currentUserId, res) {
+    let postQuery = `
+        SELECT
+            p.id,
+            u.username,
+            u.profile_picture,
+            p.file_url,
+            p.content,
+            p.created_at
+        FROM
+            posts p
+        INNER JOIN
+            users u ON p.user_id = u.id
+        WHERE
+            p.id = ? AND p.user_id = ?;
+    `;
+
+    db.query(postQuery, [postId, userId], (err, result) => {
+        if (err) {
+            return res.status(500).json({
+                success: false,
+                error: err.message,
+                data: null,
+            });
+        }
+
+        if (result.length === 0) {
+            return res.status(404).json({
+                success: false,
+                error: "Post not found",
+                data: null,
+            });
+        }
+
+        const post = result[0];
 
         let likesQuery = `
             SELECT
@@ -992,10 +1095,10 @@ function fetchPosts(userId, currentUserId, res) {
             FROM
                 likes
             WHERE
-                post_id IN (?);
+                post_id = ?;
         `;
 
-        db.query(likesQuery, [postIds], (err, likesResult) => {
+        db.query(likesQuery, [postId], (err, likesResult) => {
             if (err) {
                 return res.status(500).json({
                     success: false,
@@ -1004,27 +1107,13 @@ function fetchPosts(userId, currentUserId, res) {
                 });
             }
 
-            const likeCounts = likesResult.reduce((acc, like) => {
-                acc[like.post_id] = (acc[like.post_id] || 0) + 1;
-                return acc;
-            }, {});
+            const likeCount = likesResult.length;
 
-            const likedPostsByCurrentUser = new Set(likesResult.map((like) => like.post_id));
+            const likedByCurrentUser = likesResult.some((like) => like.user_id == currentUserId);
 
-            result.forEach((post) => {
-                const createdAt = new Date(post.created_at);
-                post.timeAgo = getTimeAgo(createdAt);
-                post.like_count = likeCounts[post.id] || 0;
-                post.liked_by_current_user = likedPostsByCurrentUser.has(post.id) ? 1 : 0;
-            });
-
-            if (postIds.length === 0) {
-                return res.status(200).json({
-                    success: true,
-                    error: null,
-                    data: result,
-                });
-            }
+            post.like_count = likeCount;
+            post.liked_by_current_user = likedByCurrentUser ? 1 : 0;
+            post.timeAgo = getTimeAgo(new Date(post.created_at));
 
             let commentsQuery = `
                 SELECT
@@ -1046,14 +1135,14 @@ function fetchPosts(userId, currentUserId, res) {
                 LEFT JOIN
                     comment_likes cl ON c.id = cl.comment_id
                 WHERE
-                    c.post_id IN (?)
+                    c.post_id = ?
                 GROUP BY
                     c.id
                 ORDER BY
                     c.created_at DESC;
             `;
 
-            db.query(commentsQuery, [userId, postIds], (err, commentsResult) => {
+            db.query(commentsQuery, [currentUserId, postId], (err, commentsResult) => {
                 if (err) {
                     return res.status(500).json({
                         success: false,
@@ -1062,24 +1151,17 @@ function fetchPosts(userId, currentUserId, res) {
                     });
                 }
 
-                const commentsByPostId = commentsResult.reduce((acc, comment) => {
-                    if (!acc[comment.post_id]) {
-                        acc[comment.post_id] = [];
-                    }
+                commentsResult.forEach((comment) => {
                     comment.timeAgo = getTimeAgo(new Date(comment.created_at));
-                    acc[comment.post_id].push(comment);
-                    return acc;
-                }, {});
-
-                result.forEach((post) => {
-                    post.comment_count = commentsByPostId[post.id] ? commentsByPostId[post.id].length : 0;
-                    post.comments = commentsByPostId[post.id] || [];
                 });
+
+                post.comment_count = commentsResult.length;
+                post.comments = commentsResult;
 
                 res.status(200).json({
                     success: true,
                     error: null,
-                    data: result,
+                    data: post,
                 });
             });
         });
