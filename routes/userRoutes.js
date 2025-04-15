@@ -97,10 +97,7 @@ router.post("/update-profile-picture", upload.single("profile_pic"), async (req,
 
     try {
         // Resize the image using sharp
-        const resizedImageBuffer = await sharp(file.buffer)
-            .resize({ width: 300, height: 300, fit: "cover" }) // Resize to 300x300
-            .toFormat("jpeg")
-            .toBuffer();
+        const resizedImageBuffer = await sharp(file.buffer).resize({ width: 150, height: 150, fit: "cover" }).toFormat("jpeg").toBuffer();
 
         // Define S3 upload parameters
         const uploadParams = {
