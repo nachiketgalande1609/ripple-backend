@@ -21,8 +21,6 @@ const getTimeAgo = (createdAt) => {
 };
 
 function createNotification(userId, senderId, type, message, postId = null, commentId = null) {
-    console.log(userId, senderId, type, message, (postId = null), (commentId = null));
-
     return new Promise((resolve, reject) => {
         const insertNotificationQuery = `
             INSERT INTO notifications (user_id, sender_id, type, message, post_id, comment_id, created_at)

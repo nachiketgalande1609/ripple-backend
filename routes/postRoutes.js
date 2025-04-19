@@ -7,6 +7,8 @@ const multer = require("multer");
 const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
 const { emitUnreadNotificationCount, emitNotifications } = require("../utils/utils");
 const sharp = require("sharp");
+const util = require("util");
+const dbQuery = util.promisify(db.query).bind(db);
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -19,7 +21,7 @@ const s3 = new S3Client({
 });
 
 // Like Post
-router.post("/like-post", (req, res) => {
+router.post("/like-post", async (req, res) => {
     const currentUserId = req.headers["x-current-user-id"];
     const { postId } = req.body;
 
@@ -31,156 +33,83 @@ router.post("/like-post", (req, res) => {
         });
     }
 
-    const checkLikeQuery = "SELECT * FROM likes WHERE user_id = ? AND post_id = ?";
+    try {
+        const existingLike = await dbQuery("SELECT * FROM likes WHERE user_id = ? AND post_id = ?", [currentUserId, postId]);
 
-    db.query(checkLikeQuery, [currentUserId, postId], (err, result) => {
-        if (err) {
-            return res.status(500).json({
-                success: false,
-                error: err.message,
-                data: null,
-            });
-        }
-
-        if (result.length > 0) {
+        if (existingLike.length > 0) {
             // Unlike the post
-            const removeLikeQuery = "DELETE FROM likes WHERE user_id = ? AND post_id = ?";
+            await dbQuery("DELETE FROM likes WHERE user_id = ? AND post_id = ?", [currentUserId, postId]);
 
-            db.query(removeLikeQuery, [currentUserId, postId], (err) => {
-                if (err) {
-                    return res.status(500).json({
-                        success: false,
-                        error: err.message,
-                        data: null,
-                    });
-                }
+            const likeCountResult = await dbQuery("SELECT COUNT(*) AS like_count FROM likes WHERE post_id = ?", [postId]);
 
-                // Calculate the updated like count from the likes table
-                const likesCountQuery = "SELECT COUNT(*) AS like_count FROM likes WHERE post_id = ?";
-
-                db.query(likesCountQuery, [postId], (err, countResult) => {
-                    if (err) {
-                        return res.status(500).json({
-                            success: false,
-                            error: err.message,
-                            data: null,
-                        });
-                    }
-
-                    res.status(200).json({
-                        success: true,
-                        message: "Post unliked successfully.",
-                        like_count: countResult[0].like_count,
-                    });
-                });
+            return res.status(200).json({
+                success: true,
+                message: "Post unliked successfully.",
+                like_count: likeCountResult[0].like_count,
             });
         } else {
             // Like the post
-            const addLikeQuery = "INSERT INTO likes (user_id, post_id, created_at) VALUES (?, ?, NOW())";
+            await dbQuery("INSERT INTO likes (user_id, post_id, created_at) VALUES (?, ?, NOW())", [currentUserId, postId]);
 
-            db.query(addLikeQuery, [currentUserId, postId], (err) => {
-                if (err) {
-                    return res.status(500).json({
-                        success: false,
-                        error: err.message,
-                        data: null,
-                    });
-                }
+            const postResult = await dbQuery("SELECT user_id FROM posts WHERE id = ?", [postId]);
 
-                // Get the user ID of the post author
-                const getPostAuthorQuery = "SELECT user_id FROM posts WHERE id = ?";
+            const postAuthorId = postResult[0]?.user_id;
 
-                db.query(getPostAuthorQuery, [postId], (err, postResult) => {
-                    if (err) {
-                        return res.status(500).json({
-                            success: false,
-                            error: err.message,
-                            data: null,
-                        });
-                    }
-
-                    const postAuthorId = postResult[0]?.user_id;
-                    if (!postAuthorId) {
-                        return res.status(404).json({
-                            success: false,
-                            error: "Post not found.",
-                            data: null,
-                        });
-                    }
-
-                    // Check if the user is liking their own post
-                    if (currentUserId === postAuthorId) {
-                        return res.status(200).json({
-                            success: true,
-                            message: "You liked your own post.",
-                            like_count: result.length,
-                        });
-                    }
-
-                    // Fetch the username of the user who liked the post
-                    const getUserNameQuery = "SELECT username FROM users WHERE id = ?";
-
-                    db.query(getUserNameQuery, [currentUserId], (err, userResult) => {
-                        if (err) {
-                            return res.status(500).json({
-                                success: false,
-                                error: err.message,
-                                data: null,
-                            });
-                        }
-
-                        const userName = userResult[0]?.username;
-                        if (!userName) {
-                            return res.status(404).json({
-                                success: false,
-                                error: "User not found.",
-                                data: null,
-                            });
-                        }
-
-                        // Create a notification for the post's author
-                        if (postAuthorId != currentUserId) {
-                            const notificationMessage = `liked your post.`;
-                            createNotification(postAuthorId, currentUserId, "like", notificationMessage, postId)
-                                .then(() => {
-                                    emitUnreadNotificationCount(postAuthorId);
-                                    emitNotifications(postAuthorId, notificationMessage);
-
-                                    const likesCountQuery = "SELECT COUNT(*) AS like_count FROM likes WHERE post_id = ?";
-
-                                    db.query(likesCountQuery, [postId], (err, countResult) => {
-                                        if (err) {
-                                            return res.status(500).json({
-                                                success: false,
-                                                error: err.message,
-                                                data: null,
-                                            });
-                                        }
-
-                                        res.status(200).json({
-                                            success: true,
-                                            message: "Post liked successfully.",
-                                            like_count: countResult[0].like_count,
-                                        });
-                                    });
-                                })
-                                .catch((err) => {
-                                    return res.status(500).json({
-                                        success: false,
-                                        error: err.message,
-                                        data: null,
-                                    });
-                                });
-                        }
-                    });
+            if (!postAuthorId) {
+                return res.status(404).json({
+                    success: false,
+                    error: "Post not found.",
+                    data: null,
                 });
+            }
+
+            // If liking own post
+            if (currentUserId === postAuthorId) {
+                const likeCountResult = await dbQuery("SELECT COUNT(*) AS like_count FROM likes WHERE post_id = ?", [postId]);
+
+                return res.status(200).json({
+                    success: true,
+                    message: "You liked your own post.",
+                    like_count: likeCountResult[0].like_count,
+                });
+            }
+
+            const userResult = await dbQuery("SELECT username FROM users WHERE id = ?", [currentUserId]);
+
+            const userName = userResult[0]?.username;
+
+            if (!userName) {
+                return res.status(404).json({
+                    success: false,
+                    error: "User not found.",
+                    data: null,
+                });
+            }
+
+            const notificationMessage = `liked your post.`;
+
+            await createNotification(postAuthorId, currentUserId, "like", notificationMessage, postId);
+            emitUnreadNotificationCount(postAuthorId);
+            emitNotifications(postAuthorId, notificationMessage);
+
+            const likeCountResult = await dbQuery("SELECT COUNT(*) AS like_count FROM likes WHERE post_id = ?", [postId]);
+
+            return res.status(200).json({
+                success: true,
+                message: "Post liked successfully.",
+                like_count: likeCountResult[0].like_count,
             });
         }
-    });
+    } catch (err) {
+        return res.status(500).json({
+            success: false,
+            error: err.message,
+            data: null,
+        });
+    }
 });
 
-// Comment on Post
-router.post("/submit-post-comment", (req, res) => {
+router.post("/submit-post-comment", async (req, res) => {
     const currentUserId = req.headers["x-current-user-id"];
     const { postId, comment } = req.body;
 
@@ -192,75 +121,55 @@ router.post("/submit-post-comment", (req, res) => {
         });
     }
 
-    const insertCommentQuery =
-        "INSERT INTO comments (user_id, post_id, content, created_at) VALUES (?, ?, ?, CONVERT_TZ(NOW(), 'UTC', 'Asia/Kolkata'))";
+    try {
+        const insertResult = await dbQuery(
+            "INSERT INTO comments (user_id, post_id, content, created_at) VALUES (?, ?, ?, CONVERT_TZ(NOW(), 'UTC', 'Asia/Kolkata'))",
+            [currentUserId, postId, comment]
+        );
 
-    db.query(insertCommentQuery, [currentUserId, postId, comment], (err, result) => {
-        if (err) {
-            return res.status(500).json({
+        const commentId = insertResult.insertId;
+
+        const postResult = await dbQuery("SELECT user_id FROM posts WHERE id = ?", [postId]);
+
+        const postAuthorId = postResult[0]?.user_id;
+
+        if (!postAuthorId) {
+            return res.status(404).json({
                 success: false,
-                error: err.message,
+                error: "Post not found.",
                 data: null,
             });
         }
 
-        const commentId = result.insertId;
+        if (currentUserId === postAuthorId) {
+            return res.status(200).json({
+                success: true,
+                message: "You commented on your own post.",
+                commentId,
+            });
+        }
 
-        const getPostAuthorQuery = "SELECT user_id FROM posts WHERE id = ?";
+        const notificationMessage = `commented on your post: "${comment}"`;
 
-        db.query(getPostAuthorQuery, [postId], (err, postResult) => {
-            if (err) {
-                return res.status(500).json({
-                    success: false,
-                    error: err.message,
-                    data: null,
-                });
-            }
+        await createNotification(postAuthorId, currentUserId, "comment", notificationMessage, postId, commentId);
+        emitUnreadNotificationCount(postAuthorId);
 
-            const postAuthorId = postResult[0]?.user_id;
-            if (!postAuthorId) {
-                return res.status(404).json({
-                    success: false,
-                    error: "Post not found.",
-                    data: null,
-                });
-            }
-
-            // Check if the user is commenting on their own post
-            if (currentUserId === postAuthorId) {
-                return res.status(200).json({
-                    success: true,
-                    message: "You commented on your own post.",
-                    commentId: result.insertId,
-                });
-            }
-
-            // Create a notification for the post's author, including the comment text and comment ID
-            if (postAuthorId != currentUserId) {
-                const notificationMessage = `commented on your post: "${comment}"`; // Include the comment content in the notification
-                createNotification(postAuthorId, currentUserId, "comment", notificationMessage, postId, commentId)
-                    .then(() => {
-                        emitUnreadNotificationCount(postAuthorId);
-                        return res.status(201).json({
-                            success: true,
-                            message: "Comment added and notification sent successfully.",
-                            commentId: result.insertId,
-                        });
-                    })
-                    .catch((err) => {
-                        return res.status(500).json({
-                            success: false,
-                            error: err.message,
-                            data: null,
-                        });
-                    });
-            }
+        return res.status(201).json({
+            success: true,
+            message: "Comment added and notification sent successfully.",
+            commentId,
         });
-    });
+    } catch (err) {
+        return res.status(500).json({
+            success: false,
+            error: err.message,
+            data: null,
+        });
+    }
 });
 
 // Delete Comment
-router.delete("/delete-comment", (req, res) => {
+router.delete("/delete-comment", async (req, res) => {
     const currentUserId = req.headers["x-current-user-id"];
     const { commentId } = req.body;
 
@@ -272,15 +181,9 @@ router.delete("/delete-comment", (req, res) => {
         });
     }
 
-    const getCommentQuery = "SELECT user_id FROM comments WHERE id = ?";
-    db.query(getCommentQuery, [commentId], (err, commentResult) => {
-        if (err) {
-            return res.status(500).json({
-                success: false,
-                error: err.message,
-                data: null,
-            });
-        }
+    try {
+        // Check if comment exists and get owner
+        const commentResult = await dbQuery("SELECT user_id FROM comments WHERE id = ?", [commentId]);
 
         if (commentResult.length === 0) {
             return res.status(404).json({
@@ -300,32 +203,29 @@ router.delete("/delete-comment", (req, res) => {
             });
         }
 
-        const deleteCommentQuery = "DELETE FROM comments WHERE id = ?";
-        db.query(deleteCommentQuery, [commentId], (err, result) => {
-            if (err) {
-                return res.status(500).json({
-                    success: false,
-                    error: err.message,
-                    data: null,
-                });
-            }
+        // Delete the comment
+        await dbQuery("DELETE FROM comments WHERE id = ?", [commentId]);
 
-            return res.status(200).json({
-                success: true,
-                error: null,
-                data: "Comment deleted successfully.",
-            });
+        return res.status(200).json({
+            success: true,
+            error: null,
+            data: "Comment deleted successfully.",
         });
-    });
+    } catch (err) {
+        return res.status(500).json({
+            success: false,
+            error: err.message,
+            data: null,
+        });
+    }
 });
 
 // Save Post
-router.post("/save-post", (req, res) => {
+router.post("/save-post", async (req, res) => {
     const currentUserId = req.headers["x-current-user-id"];
-
     const { postId } = req.body;
 
-    // Validate the input
+    // Validate inputs
     if (!currentUserId || !postId) {
         return res.status(400).json({
             success: false,
@@ -334,70 +234,41 @@ router.post("/save-post", (req, res) => {
         });
     }
 
-    // Check if the post is already saved in the saved_posts table for this user
-    const checkSavedPostQuery = `
-        SELECT 1 FROM saved_posts WHERE user_id = ? AND post_id = ?
-    `;
+    try {
+        const checkSaved = await dbQuery("SELECT 1 FROM saved_posts WHERE user_id = ? AND post_id = ?", [currentUserId, postId]);
 
-    db.query(checkSavedPostQuery, [currentUserId, postId], (err, result) => {
-        if (err) {
-            return res.status(500).json({
-                success: false,
-                error: err.message,
-                data: null,
-            });
-        }
+        if (checkSaved.length > 0) {
+            // If post already saved, remove it (toggle off)
+            await dbQuery("DELETE FROM saved_posts WHERE user_id = ? AND post_id = ?", [currentUserId, postId]);
 
-        if (result.length > 0) {
-            // If the post is already saved, remove it (toggle action)
-            const deleteSavedPostQuery = `
-                DELETE FROM saved_posts WHERE user_id = ? AND post_id = ?
-            `;
-
-            db.query(deleteSavedPostQuery, [currentUserId, postId], (err, result) => {
-                if (err) {
-                    return res.status(500).json({
-                        success: false,
-                        error: err.message,
-                        data: null,
-                    });
-                }
-
-                res.status(200).json({
-                    success: true,
-                    error: null,
-                    data: {
-                        message: "Post removed from saved posts",
-                        postId,
-                    },
-                });
+            return res.status(200).json({
+                success: true,
+                error: null,
+                data: {
+                    message: "Post removed from saved posts",
+                    postId,
+                },
             });
         } else {
-            // If the post is not saved, save it (toggle action)
-            const insertSavedPostQuery = `
-                INSERT INTO saved_posts (user_id, post_id) VALUES (?, ?)
-            `;
+            // If not saved, insert (toggle on)
+            await dbQuery("INSERT INTO saved_posts (user_id, post_id) VALUES (?, ?)", [currentUserId, postId]);
 
-            db.query(insertSavedPostQuery, [currentUserId, postId], (err, result) => {
-                if (err) {
-                    return res.status(500).json({
-                        success: false,
-                        error: err.message,
-                        data: null,
-                    });
-                }
-
-                res.status(200).json({
-                    success: true,
-                    error: null,
-                    data: {
-                        message: "Post saved successfully",
-                        postId,
-                    },
-                });
+            return res.status(200).json({
+                success: true,
+                error: null,
+                data: {
+                    message: "Post saved successfully",
+                    postId,
+                },
             });
         }
-    });
+    } catch (err) {
+        return res.status(500).json({
+            success: false,
+            error: err.message,
+            data: null,
+        });
+    }
 });
 
 // Fetch Home Page Posts
@@ -405,11 +276,11 @@ router.get("/fetch-posts", async (req, res) => {
     try {
         const userId = req.headers["x-current-user-id"];
 
-        let postsQuery = `
+        const postsQuery = `
             SELECT u.username,
-                u.profile_picture,
-                p.*,
-                IF(sp.user_id IS NOT NULL, 1, 0) AS saved_by_current_user
+                   u.profile_picture,
+                   p.*,
+                   IF(sp.user_id IS NOT NULL, 1, 0) AS saved_by_current_user
             FROM posts p
             JOIN users u ON p.user_id = u.id
             LEFT JOIN saved_posts sp ON p.id = sp.post_id AND sp.user_id = ?
@@ -421,48 +292,47 @@ router.get("/fetch-posts", async (req, res) => {
             ORDER BY p.created_at DESC;
         `;
 
-        // Fetch posts
-        const [postsResult] = await db.promise().query(postsQuery, [userId, userId, userId]);
+        const postsResult = await dbQuery(postsQuery, [userId, userId, userId]);
         if (!postsResult.length) {
-            return res.status(200).json({
-                success: true,
-                error: null,
-                data: [],
-            });
+            return res.status(200).json({ success: true, error: null, data: [] });
         }
 
-        // Extract post IDs
         const postIds = postsResult.map((post) => post.id);
         if (postIds.length === 0) {
-            return res.status(200).json({
-                success: true,
-                error: null,
-                data: [],
-            });
+            return res.status(200).json({ success: true, error: null, data: [] });
         }
 
-        // Fetch like counts
-        let likesQuery = `SELECT post_id, COUNT(*) AS like_count FROM likes WHERE post_id IN (?) GROUP BY post_id;`;
-        const [likesResult] = await db.promise().query(likesQuery, [postIds]);
+        // Like counts
+        const likesQuery = `
+            SELECT post_id, COUNT(*) AS like_count
+            FROM likes
+            WHERE post_id IN (?)
+            GROUP BY post_id;
+        `;
+        const likesResult = await dbQuery(likesQuery, [postIds]);
+
         const likeCounts = likesResult.reduce((acc, like) => {
             acc[like.post_id] = like.like_count;
             return acc;
         }, {});
 
-        // Fetch liked posts by the user
+        // Posts liked by the current user
         let likedPostsByCurrentUser = new Set();
         if (userId) {
-            let likedPostsQuery = `SELECT post_id FROM likes WHERE user_id = ? AND post_id IN (?);`;
-            const [likedPostsResult] = await db.promise().query(likedPostsQuery, [userId, postIds]);
+            const likedPostsQuery = `
+                SELECT post_id FROM likes WHERE user_id = ? AND post_id IN (?);
+            `;
+            const likedPostsResult = await dbQuery(likedPostsQuery, [userId, postIds]);
             likedPostsByCurrentUser = new Set(likedPostsResult.map((like) => like.post_id));
         }
 
-        // Fetch comments
-        let commentsQuery = `
-            SELECT c.id, c.post_id, c.user_id, c.content, c.parent_comment_id, c.created_at, c.updated_at, 
-                u.username AS commenter_username, u.profile_picture AS commenter_profile_picture,
-                COUNT(cl.id) AS likes_count,
-                MAX(CASE WHEN cl.user_id = ? THEN 1 ELSE 0 END) AS liked_by_user
+        // Comments + comment likes
+        const commentsQuery = `
+            SELECT c.id, c.post_id, c.user_id, c.content, c.parent_comment_id,
+                   c.created_at, c.updated_at,
+                   u.username AS commenter_username, u.profile_picture AS commenter_profile_picture,
+                   COUNT(cl.id) AS likes_count,
+                   MAX(CASE WHEN cl.user_id = ? THEN 1 ELSE 0 END) AS liked_by_user
             FROM comments c
             INNER JOIN users u ON c.user_id = u.id
             LEFT JOIN comment_likes cl ON c.id = cl.comment_id
@@ -470,13 +340,11 @@ router.get("/fetch-posts", async (req, res) => {
             GROUP BY c.id
             ORDER BY c.created_at DESC;
         `;
-        const [commentsResult] = await db.promise().query(commentsQuery, [userId, postIds]);
+        const commentsResult = await dbQuery(commentsQuery, [userId, postIds]);
 
         // Organize comments by post_id
         const commentsByPostId = commentsResult.reduce((acc, comment) => {
-            if (!acc[comment.post_id]) {
-                acc[comment.post_id] = [];
-            }
+            if (!acc[comment.post_id]) acc[comment.post_id] = [];
             comment.timeAgo = getTimeAgo(new Date(comment.created_at));
             comment.likes_count = Number(comment.likes_count) || 0;
             comment.liked_by_user = Boolean(comment.liked_by_user);
@@ -484,19 +352,22 @@ router.get("/fetch-posts", async (req, res) => {
             return acc;
         }, {});
 
-        // Finalize posts data
-        postsResult.forEach((post) => {
-            post.timeAgo = getTimeAgo(new Date(post.created_at));
-            post.like_count = likeCounts[post.id] || 0;
-            post.liked_by_current_user = likedPostsByCurrentUser.has(post.id) ? 1 : 0;
-            post.comment_count = commentsByPostId[post.id] ? commentsByPostId[post.id].length : 0;
-            post.comments = commentsByPostId[post.id] || [];
+        // Finalizing post objects
+        const finalPosts = postsResult.map((post) => {
+            return {
+                ...post,
+                timeAgo: getTimeAgo(new Date(post.created_at)),
+                like_count: likeCounts[post.id] || 0,
+                liked_by_current_user: likedPostsByCurrentUser.has(post.id) ? 1 : 0,
+                comment_count: commentsByPostId[post.id]?.length || 0,
+                comments: commentsByPostId[post.id] || [],
+            };
         });
 
         return res.status(200).json({
             success: true,
             error: null,
-            data: postsResult,
+            data: finalPosts,
         });
     } catch (error) {
         console.error("Error fetching posts:", error);
@@ -509,25 +380,14 @@ router.get("/fetch-posts", async (req, res) => {
 });
 
 // Fetch Profile Page Posts
-router.get(["/fetch-profile-posts"], (req, res) => {
+router.get("/fetch-profile-posts", async (req, res) => {
     const currentUserId = req.headers["x-current-user-id"];
     const { userId } = req.query;
 
-    // Query to check if the user is private
-    const privacyQuery = `
-        SELECT is_private 
-        FROM users 
-        WHERE id = ?;
-    `;
-
-    db.query(privacyQuery, [userId], (err, userResult) => {
-        if (err) {
-            return res.status(500).json({
-                success: false,
-                error: err.message,
-                data: null,
-            });
-        }
+    try {
+        // Check if the user exists and is private
+        const privacyQuery = `SELECT is_private FROM users WHERE id = ?;`;
+        const userResult = await dbQuery(privacyQuery, [userId]);
 
         if (userResult.length === 0) {
             return res.status(404).json({
@@ -540,60 +400,42 @@ router.get(["/fetch-profile-posts"], (req, res) => {
         const isPrivate = userResult[0].is_private;
 
         if (isPrivate && currentUserId != userId) {
-            // Check if the current user is following this private account
             const followCheckQuery = `
                 SELECT 1 
                 FROM followers 
                 WHERE follower_id = ? AND following_id = ?;
             `;
+            const followResult = await dbQuery(followCheckQuery, [currentUserId, userId]);
 
-            db.query(followCheckQuery, [currentUserId, userId], (err, followResult) => {
-                if (err) {
-                    return res.status(500).json({
-                        success: false,
-                        error: err.message,
-                        data: null,
-                    });
-                }
-
-                if (followResult.length === 0) {
-                    return res.status(403).json({
-                        success: false,
-                        error: "This account is private. You must follow the user to see their posts.",
-                        data: null,
-                    });
-                }
-
-                // User is following, so proceed with fetching posts
-                fetchPosts(userId, res);
-            });
-        } else {
-            // User is public, proceed with fetching posts
-            fetchPosts(userId, res);
+            if (followResult.length === 0) {
+                return res.status(403).json({
+                    success: false,
+                    error: "This account is private. You must follow the user to see their posts.",
+                    data: null,
+                });
+            }
         }
-    });
+
+        // Fetch posts if public or following
+        await fetchPosts(userId, res);
+    } catch (err) {
+        return res.status(500).json({
+            success: false,
+            error: err.message,
+            data: null,
+        });
+    }
 });
 
 // Fetch Post Details
-router.get(["/fetch-post-details"], (req, res) => {
+router.get("/fetch-post-details", async (req, res) => {
     const currentUserId = req.headers["x-current-user-id"];
     const { userId, postId } = req.query;
 
-    // Query to check if the user is private
-    const privacyQuery = `
-        SELECT is_private 
-        FROM users 
-        WHERE id = ?;
-    `;
-
-    db.query(privacyQuery, [userId], (err, userResult) => {
-        if (err) {
-            return res.status(500).json({
-                success: false,
-                error: err.message,
-                data: null,
-            });
-        }
+    try {
+        // Check if user exists and is private
+        const privacyQuery = `SELECT is_private FROM users WHERE id = ?;`;
+        const userResult = await dbQuery(privacyQuery, [userId]);
 
         if (userResult.length === 0) {
             return res.status(404).json({
@@ -606,38 +448,31 @@ router.get(["/fetch-post-details"], (req, res) => {
         const isPrivate = userResult[0].is_private;
 
         if (isPrivate && currentUserId != userId) {
-            // Check if the current user is following this private account
             const followCheckQuery = `
                 SELECT 1 
                 FROM followers 
                 WHERE follower_id = ? AND following_id = ?;
             `;
+            const followResult = await dbQuery(followCheckQuery, [currentUserId, userId]);
 
-            db.query(followCheckQuery, [currentUserId, userId], (err, followResult) => {
-                if (err) {
-                    return res.status(500).json({
-                        success: false,
-                        error: err.message,
-                        data: null,
-                    });
-                }
-
-                if (followResult.length === 0) {
-                    return res.status(403).json({
-                        success: false,
-                        error: "This account is private. You must follow the user to see their posts.",
-                        data: null,
-                    });
-                }
-
-                // User is following, so proceed with fetching posts
-                fetchPostDetails(userId, postId, currentUserId, res);
-            });
-        } else {
-            // User is public, proceed with fetching posts
-            fetchPostDetails(userId, postId, currentUserId, res);
+            if (followResult.length === 0) {
+                return res.status(403).json({
+                    success: false,
+                    error: "This account is private. You must follow the user to see their posts.",
+                    data: null,
+                });
+            }
         }
-    });
+
+        // Either public or allowed follower — fetch post details
+        await fetchPostDetails(userId, postId, currentUserId, res);
+    } catch (err) {
+        return res.status(500).json({
+            success: false,
+            error: err.message,
+            data: null,
+        });
+    }
 });
 
 // Create Post
@@ -657,14 +492,11 @@ router.post("/create-post", upload.single("image"), async (req, res) => {
     const fileType = file.mimetype;
     let mediaWidth = null;
     let mediaHeight = null;
-
     let resizedImageBuffer;
 
     if (fileType.startsWith("image/")) {
         try {
-            const image = sharp(file.buffer);
-            image.resize({ width: 1080 });
-
+            const image = sharp(file.buffer).resize({ width: 1080 });
             resizedImageBuffer = await image.toBuffer();
             const metadata = await sharp(resizedImageBuffer).metadata();
             mediaWidth = metadata.width;
@@ -695,42 +527,34 @@ router.post("/create-post", upload.single("image"), async (req, res) => {
 
         const fileUrl = `https://${uploadParams.Bucket}.s3.${process.env.AWS_REGION}.amazonaws.com/${uploadParams.Key}`;
 
-        // Insert post into database with image dimensions
-        const query = `
+        const insertQuery = `
             INSERT INTO posts (content, file_url, location, user_id, media_width, media_height)
             VALUES (?, ?, ?, ?, ?, ?)
         `;
-        db.query(query, [content, fileUrl, location, user_id, mediaWidth, mediaHeight], (err, result) => {
-            if (err) {
-                return res.status(500).json({
-                    success: false,
-                    error: err.message,
-                    data: null,
-                });
-            }
 
-            res.status(201).json({
-                success: true,
-                error: null,
-                message: "Post created successfully",
-                postId: result.insertId,
-                fileUrl,
-                mediaWidth,
-                mediaHeight,
-            });
+        const result = await dbQuery(insertQuery, [content, fileUrl, location, user_id, mediaWidth, mediaHeight]);
+
+        return res.status(201).json({
+            success: true,
+            error: null,
+            message: "Post created successfully",
+            postId: result.insertId,
+            fileUrl,
+            mediaWidth,
+            mediaHeight,
         });
     } catch (error) {
-        console.error("S3 Upload Error:", error);
-        res.status(500).json({
+        console.error("Error creating post:", error);
+        return res.status(500).json({
             success: false,
-            error: "Failed to upload image to S3.",
+            error: "Something went wrong while creating the post.",
             data: null,
         });
     }
 });
 
 // Update Post
-router.post("/update/:postId", (req, res) => {
+router.post("/update/:postId", async (req, res) => {
     const { postId } = req.params;
     const { content } = req.body;
 
@@ -754,14 +578,8 @@ router.post("/update/:postId", (req, res) => {
     query += updates.join(", ") + " WHERE id = ?";
     values.push(postId);
 
-    db.query(query, values, (err, result) => {
-        if (err) {
-            return res.status(500).json({
-                success: false,
-                error: err.message,
-                data: null,
-            });
-        }
+    try {
+        const result = await dbQuery(query, values);
 
         if (result.affectedRows === 0) {
             return res.status(404).json({
@@ -771,7 +589,7 @@ router.post("/update/:postId", (req, res) => {
             });
         }
 
-        res.status(200).json({
+        return res.status(200).json({
             success: true,
             error: null,
             message: "Post updated successfully",
@@ -782,11 +600,18 @@ router.post("/update/:postId", (req, res) => {
                 },
             },
         });
-    });
+    } catch (err) {
+        console.error("Error updating post:", err);
+        return res.status(500).json({
+            success: false,
+            error: "An error occurred while updating the post.",
+            data: null,
+        });
+    }
 });
 
 // Delete Post
-router.delete("/delete-post", (req, res) => {
+router.delete("/delete-post", async (req, res) => {
     const currentUserId = req.headers["x-current-user-id"];
     const { postId } = req.query;
 
@@ -800,14 +625,8 @@ router.delete("/delete-post", (req, res) => {
 
     const checkOwnershipQuery = "SELECT * FROM posts WHERE id = ? AND user_id = ?";
 
-    db.query(checkOwnershipQuery, [postId, currentUserId], (err, result) => {
-        if (err) {
-            return res.status(500).json({
-                success: false,
-                error: err.message,
-                data: null,
-            });
-        }
+    try {
+        const result = await dbQuery(checkOwnershipQuery, [postId, currentUserId]);
 
         if (result.length === 0) {
             return res.status(403).json({
@@ -818,52 +637,44 @@ router.delete("/delete-post", (req, res) => {
         }
 
         const deleteQuery = "DELETE FROM posts WHERE id = ?";
+        await dbQuery(deleteQuery, [postId]);
 
-        db.query(deleteQuery, [postId], (err, result) => {
-            if (err) {
-                return res.status(500).json({
-                    success: false,
-                    error: err.message,
-                    data: null,
-                });
-            }
-
-            res.status(200).json({
-                success: true,
-                error: null,
-                message: "Post deleted successfully",
-                data: null,
-            });
+        return res.status(200).json({
+            success: true,
+            error: null,
+            message: "Post deleted successfully",
+            data: null,
         });
-    });
+    } catch (err) {
+        console.error("Error deleting post:", err);
+        return res.status(500).json({
+            success: false,
+            error: "An error occurred while deleting the post",
+            data: null,
+        });
+    }
 });
 
 // Fetch Saved Posts
-router.get(["/fetch-saved-posts"], (req, res) => {
+router.get("/fetch-saved-posts", async (req, res) => {
     const currentUserId = req.headers["x-current-user-id"];
 
-    let savedPostsQuery = `
-        SELECT u.username,
-            u.profile_picture,
-            p.*,
-            IF(sp.user_id IS NOT NULL, 1, 0) AS saved_by_current_user
-        FROM posts p
-        INNER JOIN users u
-            ON p.user_id = u.id
-        INNER JOIN saved_posts sp
-            ON p.id = sp.post_id
-        WHERE sp.user_id = ?
-        ORDER BY p.created_at DESC;
-    `;
-
-    db.query(savedPostsQuery, [currentUserId], (err, result) => {
-        if (err) {
-            return res.status(500).json({
-                success: false,
-                error: err.message,
-                data: null,
-            });
-        }
+    try {
+        // Fetch saved posts
+        const savedPostsQuery = `
+            SELECT u.username,
+                u.profile_picture,
+                p.*,
+                IF(sp.user_id IS NOT NULL, 1, 0) AS saved_by_current_user
+            FROM posts p
+            INNER JOIN users u
+                ON p.user_id = u.id
+            INNER JOIN saved_posts sp
+                ON p.id = sp.post_id
+            WHERE sp.user_id = ?
+            ORDER BY p.created_at DESC;
+        `;
+        const result = await dbQuery(savedPostsQuery, [currentUserId]);
 
         // Fetch like counts for each post
         const postIds = result.map((post) => post.id);
@@ -876,7 +687,7 @@ router.get(["/fetch-saved-posts"], (req, res) => {
             });
         }
 
-        let likesQuery = `
+        const likesQuery = `
             SELECT 
                 post_id, 
                 COUNT(*) AS like_count
@@ -887,155 +698,189 @@ router.get(["/fetch-saved-posts"], (req, res) => {
             GROUP BY 
                 post_id;
         `;
+        const likesResult = await dbQuery(likesQuery, [postIds]);
 
-        db.query(likesQuery, [postIds], (err, likesResult) => {
-            if (err) {
-                return res.status(500).json({
+        // Create a map of post_id to like_count
+        const likeCounts = likesResult.reduce((acc, like) => {
+            acc[like.post_id] = like.like_count;
+            return acc;
+        }, {});
+
+        // Fetch liked posts by current user if provided
+        const likedPostsQuery = `
+            SELECT 
+                post_id
+            FROM 
+                likes
+            WHERE 
+                user_id = ? 
+                AND post_id IN (?);
+        `;
+        const likedPostsResult = currentUserId ? await dbQuery(likedPostsQuery, [currentUserId, postIds]) : [];
+
+        const likedPostsByCurrentUser = new Set(likedPostsResult.map((like) => like.post_id));
+
+        // Add like count and like status to posts
+        result.forEach((post) => {
+            const createdAt = new Date(post.created_at);
+            post.timeAgo = getTimeAgo(createdAt);
+
+            // Set the like count
+            post.like_count = likeCounts[post.id] || 0;
+
+            // If currentUserId is provided, check if the current user liked the post
+            post.liked_by_current_user = likedPostsByCurrentUser.has(post.id) ? 1 : 0;
+        });
+
+        // Fetch comments for each post
+        const commentsQuery = `
+            SELECT 
+                c.id, 
+                c.post_id, 
+                c.user_id, 
+                c.content, 
+                c.parent_comment_id, 
+                c.created_at, 
+                c.updated_at,
+                u.username AS commenter_username, 
+                u.profile_picture AS commenter_profile_picture,
+                COUNT(cl.id) AS likes_count,
+                MAX(CASE WHEN cl.user_id = ? THEN 1 ELSE 0 END) AS liked_by_user
+            FROM 
+                comments c
+            INNER JOIN 
+                users u ON c.user_id = u.id
+            LEFT JOIN 
+                comment_likes cl ON c.id = cl.comment_id
+            WHERE 
+                c.post_id IN (?)
+            GROUP BY 
+                c.id
+            ORDER BY 
+                c.created_at DESC;
+        `;
+        const commentsResult = await dbQuery(commentsQuery, [currentUserId, postIds]);
+
+        // Organize comments by post_id and set timeAgo for each comment
+        const commentsByPostId = commentsResult.reduce((acc, comment) => {
+            if (!acc[comment.post_id]) {
+                acc[comment.post_id] = [];
+            }
+            comment.timeAgo = getTimeAgo(new Date(comment.created_at)); // Set timeAgo for comment
+            acc[comment.post_id].push(comment);
+            return acc;
+        }, {});
+
+        // Add comment count and comments to posts
+        result.forEach((post) => {
+            post.comment_count = commentsByPostId[post.id] ? commentsByPostId[post.id].length : 0; // Add comment count
+            post.comments = commentsByPostId[post.id] || []; // Add comments
+        });
+
+        return res.status(200).json({
+            success: true,
+            error: null,
+            data: result,
+        });
+    } catch (err) {
+        console.error("Error fetching saved posts:", err);
+        return res.status(500).json({
+            success: false,
+            error: "An error occurred while fetching saved posts",
+            data: null,
+        });
+    }
+});
+
+router.post("/like-comment", async (req, res) => {
+    const currentUserId = req.headers["x-current-user-id"];
+    const { commentId } = req.body;
+
+    if (!currentUserId || !commentId) {
+        return res.status(400).json({
+            success: false,
+            error: "User ID and Comment ID are required.",
+            data: null,
+        });
+    }
+
+    try {
+        const existingLike = await dbQuery("SELECT * FROM comment_likes WHERE user_id = ? AND comment_id = ?", [currentUserId, commentId]);
+
+        if (existingLike.length > 0) {
+            // Unlike
+            await dbQuery("DELETE FROM comment_likes WHERE user_id = ? AND comment_id = ?", [currentUserId, commentId]);
+
+            const countResult = await dbQuery("SELECT COUNT(*) AS like_count FROM comment_likes WHERE comment_id = ?", [commentId]);
+
+            return res.status(200).json({
+                success: true,
+                message: "Comment unliked successfully.",
+                like_count: countResult[0].like_count,
+            });
+        } else {
+            // Like
+            await dbQuery("INSERT INTO comment_likes (user_id, comment_id, created_at) VALUES (?, ?, NOW())", [currentUserId, commentId]);
+
+            const commentResult = await dbQuery("SELECT user_id, post_id FROM comments WHERE id = ?", [commentId]);
+
+            const commentAuthorId = commentResult[0]?.user_id;
+            const postId = commentResult[0]?.post_id;
+
+            if (!commentAuthorId) {
+                return res.status(404).json({
                     success: false,
-                    error: err.message,
+                    error: "Comment not found.",
                     data: null,
                 });
             }
 
-            // Create a map of post_id to like_count
-            const likeCounts = likesResult.reduce((acc, like) => {
-                acc[like.post_id] = like.like_count;
-                return acc;
-            }, {});
-
-            // If currentUserId is provided, fetch liked posts by the current user
-            if (currentUserId) {
-                let likedPostsQuery = `
-                    SELECT 
-                        post_id
-                    FROM 
-                        likes
-                    WHERE 
-                        user_id = ? 
-                        AND post_id IN (?);
-                `;
-
-                db.query(likedPostsQuery, [currentUserId, postIds], (err, likedPostsResult) => {
-                    if (err) {
-                        return res.status(500).json({
-                            success: false,
-                            error: err.message,
-                            data: null,
-                        });
-                    }
-
-                    // Create a set of post_ids that the user has liked
-                    const likedPostsByCurrentUser = new Set(likedPostsResult.map((like) => like.post_id));
-
-                    // Add like count and like status to posts
-                    result.forEach((post) => {
-                        const createdAt = new Date(post.created_at);
-                        post.timeAgo = getTimeAgo(createdAt);
-
-                        // Set the like count
-                        post.like_count = likeCounts[post.id] || 0;
-
-                        // If currentUserId is provided, check if the current user liked the post
-                        post.liked_by_current_user = likedPostsByCurrentUser.has(post.id) ? 1 : 0;
-                    });
-
-                    // Fetch comments for each post
-                    let commentsQuery = `
-                        SELECT 
-                            c.id, 
-                            c.post_id, 
-                            c.user_id, 
-                            c.content, 
-                            c.parent_comment_id, 
-                            c.created_at, 
-                            c.updated_at,
-                            u.username AS commenter_username, 
-                            u.profile_picture AS commenter_profile_picture,
-                            COUNT(cl.id) AS likes_count,
-                            MAX(CASE WHEN cl.user_id = ? THEN 1 ELSE 0 END) AS liked_by_user
-                        FROM 
-                            comments c
-                        INNER JOIN 
-                            users u ON c.user_id = u.id
-                        LEFT JOIN 
-                            comment_likes cl ON c.id = cl.comment_id
-                        WHERE 
-                            c.post_id IN (?)
-                        GROUP BY 
-                            c.id
-                        ORDER BY 
-                            c.created_at DESC;
-                    `;
-
-                    db.query(commentsQuery, [currentUserId, postIds], (err, commentsResult) => {
-                        if (err) {
-                            return res.status(500).json({
-                                success: false,
-                                error: err.message,
-                                data: null,
-                            });
-                        }
-
-                        // Organize comments by post_id and set timeAgo for each comment
-                        const commentsByPostId = commentsResult.reduce((acc, comment) => {
-                            if (!acc[comment.post_id]) {
-                                acc[comment.post_id] = [];
-                            }
-                            comment.timeAgo = getTimeAgo(new Date(comment.created_at)); // Set timeAgo for comment
-                            acc[comment.post_id].push(comment);
-                            return acc;
-                        }, {});
-
-                        // Add comment count and comments to posts
-                        result.forEach((post) => {
-                            post.comment_count = commentsByPostId[post.id] ? commentsByPostId[post.id].length : 0; // Add comment count
-                            post.comments = commentsByPostId[post.id] || []; // Add comments
-                        });
-
-                        res.status(200).json({
-                            success: true,
-                            error: null,
-                            data: result,
-                        });
-                    });
-                });
-            } else {
-                // If no currentUserId is provided, simply return the posts with like counts
-                result.forEach((post) => {
-                    post.like_count = likeCounts[post.id] || 0;
-                });
-
-                res.status(200).json({
+            // No notification if liking own comment
+            if (currentUserId === commentAuthorId) {
+                return res.status(200).json({
                     success: true,
-                    error: null,
-                    data: result,
+                    message: "You liked your own comment.",
                 });
             }
-        });
-    });
-});
 
-function fetchPosts(userId, res) {
-    let postsQuery = `
-        SELECT
-            p.id,
-            p.file_url
-        FROM
-            posts p
-        WHERE
-            p.user_id = ?
-        ORDER BY
-            p.created_at DESC;
-    `;
+            const notificationMessage = "liked your comment.";
 
-    db.query(postsQuery, [userId], (err, result) => {
-        if (err) {
-            return res.status(500).json({
-                success: false,
-                error: err.message,
-                data: null,
+            await createNotification(commentAuthorId, currentUserId, "comment_like", notificationMessage, postId, commentId);
+            emitUnreadNotificationCount(commentAuthorId);
+            emitNotifications(commentAuthorId, notificationMessage);
+
+            const countResult = await dbQuery("SELECT COUNT(*) AS like_count FROM comment_likes WHERE comment_id = ?", [commentId]);
+
+            return res.status(200).json({
+                success: true,
+                message: "Comment liked successfully.",
+                like_count: countResult[0].like_count,
             });
         }
+    } catch (err) {
+        return res.status(500).json({
+            success: false,
+            error: err.message,
+            data: null,
+        });
+    }
+});
+
+async function fetchPosts(userId, res) {
+    try {
+        const postsQuery = `
+            SELECT
+                p.id,
+                p.file_url
+            FROM
+                posts p
+            WHERE
+                p.user_id = ?
+            ORDER BY
+                p.created_at DESC;
+        `;
+
+        const result = await dbQuery(postsQuery, [userId]);
 
         if (result.length === 0) {
             return res.status(200).json({
@@ -1050,34 +895,35 @@ function fetchPosts(userId, res) {
             error: null,
             data: result,
         });
-    });
+    } catch (err) {
+        console.error("Error fetching posts:", err);
+        return res.status(500).json({
+            success: false,
+            error: err.message,
+            data: null,
+        });
+    }
 }
 
-function fetchPostDetails(userId, postId, currentUserId, res) {
-    let postQuery = `
-        SELECT
-            p.id,
-            u.username,
-            u.profile_picture,
-            p.file_url,
-            p.content,
-            p.created_at
-        FROM
-            posts p
-        INNER JOIN
-            users u ON p.user_id = u.id
-        WHERE
-            p.id = ? AND p.user_id = ?;
-    `;
+async function fetchPostDetails(userId, postId, currentUserId, res) {
+    try {
+        const postQuery = `
+            SELECT
+                p.id,
+                u.username,
+                u.profile_picture,
+                p.file_url,
+                p.content,
+                p.created_at
+            FROM
+                posts p
+            INNER JOIN
+                users u ON p.user_id = u.id
+            WHERE
+                p.id = ? AND p.user_id = ?;
+        `;
 
-    db.query(postQuery, [postId, userId], (err, result) => {
-        if (err) {
-            return res.status(500).json({
-                success: false,
-                error: err.message,
-                data: null,
-            });
-        }
+        const result = await dbQuery(postQuery, [postId, userId]);
 
         if (result.length === 0) {
             return res.status(404).json({
@@ -1089,7 +935,7 @@ function fetchPostDetails(userId, postId, currentUserId, res) {
 
         const post = result[0];
 
-        let likesQuery = `
+        const likesQuery = `
             SELECT
                 post_id,
                 user_id
@@ -1099,209 +945,64 @@ function fetchPostDetails(userId, postId, currentUserId, res) {
                 post_id = ?;
         `;
 
-        db.query(likesQuery, [postId], (err, likesResult) => {
-            if (err) {
-                return res.status(500).json({
-                    success: false,
-                    error: err.message,
-                    data: null,
-                });
-            }
+        const likesResult = await dbQuery(likesQuery, [postId]);
+        const likeCount = likesResult.length;
 
-            const likeCount = likesResult.length;
+        const likedByCurrentUser = likesResult.some((like) => like.user_id == currentUserId);
 
-            const likedByCurrentUser = likesResult.some((like) => like.user_id == currentUserId);
+        post.like_count = likeCount;
+        post.liked_by_current_user = likedByCurrentUser ? 1 : 0;
+        post.timeAgo = getTimeAgo(new Date(post.created_at));
 
-            post.like_count = likeCount;
-            post.liked_by_current_user = likedByCurrentUser ? 1 : 0;
-            post.timeAgo = getTimeAgo(new Date(post.created_at));
+        const commentsQuery = `
+            SELECT
+                c.id,
+                c.post_id,
+                c.user_id,
+                c.content,
+                c.parent_comment_id,
+                c.created_at,
+                c.updated_at,
+                u.username AS commenter_username,
+                u.profile_picture AS commenter_profile_picture,
+                COUNT(cl.id) AS likes_count,
+                MAX(CASE WHEN cl.user_id = ? THEN 1 ELSE 0 END) AS liked_by_user
+            FROM
+                comments c
+            INNER JOIN
+                users u ON c.user_id = u.id
+            LEFT JOIN
+                comment_likes cl ON c.id = cl.comment_id
+            WHERE
+                c.post_id = ?
+            GROUP BY
+                c.id
+            ORDER BY
+                c.created_at DESC;
+        `;
 
-            let commentsQuery = `
-                SELECT
-                    c.id,
-                    c.post_id,
-                    c.user_id,
-                    c.content,
-                    c.parent_comment_id,
-                    c.created_at,
-                    c.updated_at,
-                    u.username AS commenter_username,
-                    u.profile_picture AS commenter_profile_picture,
-                    COUNT(cl.id) AS likes_count,
-                    MAX(CASE WHEN cl.user_id = ? THEN 1 ELSE 0 END) AS liked_by_user
-                FROM
-                    comments c
-                INNER JOIN
-                    users u ON c.user_id = u.id
-                LEFT JOIN
-                    comment_likes cl ON c.id = cl.comment_id
-                WHERE
-                    c.post_id = ?
-                GROUP BY
-                    c.id
-                ORDER BY
-                    c.created_at DESC;
-            `;
+        const commentsResult = await dbQuery(commentsQuery, [currentUserId, postId]);
 
-            db.query(commentsQuery, [currentUserId, postId], (err, commentsResult) => {
-                if (err) {
-                    return res.status(500).json({
-                        success: false,
-                        error: err.message,
-                        data: null,
-                    });
-                }
-
-                commentsResult.forEach((comment) => {
-                    comment.timeAgo = getTimeAgo(new Date(comment.created_at));
-                });
-
-                post.comment_count = commentsResult.length;
-                post.comments = commentsResult;
-
-                res.status(200).json({
-                    success: true,
-                    error: null,
-                    data: post,
-                });
-            });
+        commentsResult.forEach((comment) => {
+            comment.timeAgo = getTimeAgo(new Date(comment.created_at));
         });
-    });
-}
 
-router.post("/like-comment", (req, res) => {
-    const currentUserId = req.headers["x-current-user-id"];
-    const { commentId } = req.body;
+        post.comment_count = commentsResult.length;
+        post.comments = commentsResult;
 
-    if (!currentUserId || !commentId) {
-        return res.status(400).json({
+        return res.status(200).json({
+            success: true,
+            error: null,
+            data: post,
+        });
+    } catch (err) {
+        console.error("Error fetching post details:", err);
+        return res.status(500).json({
             success: false,
-            error: "User ID and Comment ID are required.",
+            error: err.message,
             data: null,
         });
     }
-
-    const checkLikeQuery = "SELECT * FROM comment_likes WHERE user_id = ? AND comment_id = ?";
-
-    db.query(checkLikeQuery, [currentUserId, commentId], (err, result) => {
-        if (err) {
-            return res.status(500).json({
-                success: false,
-                error: err.message,
-                data: null,
-            });
-        }
-
-        if (result.length > 0) {
-            // Unlike comment
-            const removeLikeQuery = "DELETE FROM comment_likes WHERE user_id = ? AND comment_id = ?";
-            db.query(removeLikeQuery, [currentUserId, commentId], (err) => {
-                if (err) {
-                    return res.status(500).json({
-                        success: false,
-                        error: err.message,
-                        data: null,
-                    });
-                }
-
-                // Return updated like count
-                const countQuery = "SELECT COUNT(*) AS like_count FROM comment_likes WHERE comment_id = ?";
-                db.query(countQuery, [commentId], (err, countResult) => {
-                    if (err) {
-                        return res.status(500).json({
-                            success: false,
-                            error: err.message,
-                            data: null,
-                        });
-                    }
-
-                    return res.status(200).json({
-                        success: true,
-                        message: "Comment unliked successfully.",
-                        like_count: countResult[0].like_count,
-                    });
-                });
-            });
-        } else {
-            // Like comment
-            const addLikeQuery = "INSERT INTO comment_likes (user_id, comment_id, created_at) VALUES (?, ?, NOW())";
-
-            db.query(addLikeQuery, [currentUserId, commentId], (err) => {
-                if (err) {
-                    return res.status(500).json({
-                        success: false,
-                        error: err.message,
-                        data: null,
-                    });
-                }
-
-                // Get comment author's user ID
-                const getAuthorQuery = "SELECT user_id, post_id FROM comments WHERE id = ?";
-                db.query(getAuthorQuery, [commentId], (err, commentResult) => {
-                    if (err) {
-                        return res.status(500).json({
-                            success: false,
-                            error: err.message,
-                            data: null,
-                        });
-                    }
-
-                    const commentAuthorId = commentResult[0]?.user_id;
-                    const postId = commentResult[0]?.post_id;
-
-                    if (!commentAuthorId) {
-                        return res.status(404).json({
-                            success: false,
-                            error: "Comment not found.",
-                            data: null,
-                        });
-                    }
-
-                    // Don't notify if liking own comment
-                    if (currentUserId === commentAuthorId) {
-                        return res.status(200).json({
-                            success: true,
-                            message: "You liked your own comment.",
-                        });
-                    }
-
-                    // Create a notification
-                    if (commentAuthorId != currentUserId) {
-                        const notificationMessage = `liked your comment.`;
-                        createNotification(commentAuthorId, currentUserId, "comment_like", notificationMessage, postId, commentId)
-                            .then(() => {
-                                emitUnreadNotificationCount(commentAuthorId);
-                                emitNotifications(commentAuthorId, notificationMessage);
-
-                                const countQuery = "SELECT COUNT(*) AS like_count FROM comment_likes WHERE comment_id = ?";
-                                db.query(countQuery, [commentId], (err, countResult) => {
-                                    if (err) {
-                                        return res.status(500).json({
-                                            success: false,
-                                            error: err.message,
-                                            data: null,
-                                        });
-                                    }
-
-                                    return res.status(200).json({
-                                        success: true,
-                                        message: "Comment liked successfully.",
-                                        like_count: countResult[0].like_count,
-                                    });
-                                });
-                            })
-                            .catch((err) => {
-                                return res.status(500).json({
-                                    success: false,
-                                    error: err.message,
-                                    data: null,
-                                });
-                            });
-                    }
-                });
-            });
-        }
-    });
-});
+}
 
 module.exports = router;
