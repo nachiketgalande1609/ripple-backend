@@ -186,13 +186,11 @@ function initializeSocket(server, db) {
             let queryParams;
 
             if (reaction === null) {
-                // Remove the reaction if reaction is null
                 query = `UPDATE messages 
                  SET reactions = JSON_REMOVE(reactions, CONCAT('$."', ? , '"')) 
                  WHERE message_id = ?`;
                 queryParams = [senderUserId, messageId];
             } else {
-                // Add or update reaction
                 query = `UPDATE messages 
                  SET reactions = JSON_SET(COALESCE(reactions, '{}'), CONCAT('$."', ? , '"'), ?) 
                  WHERE message_id = ?`;
@@ -205,26 +203,42 @@ function initializeSocket(server, db) {
                     return;
                 }
 
-                // Fetch updated message to determine receiver
-                db.query(`SELECT receiver_id, sender_id FROM messages WHERE message_id = ?`, [messageId], (err, results) => {
-                    if (err) {
-                        console.error("Error fetching message data:", err.message);
+                // Fetch sender's user data (username, profile_picture)
+                db.query(`SELECT username, profile_picture FROM users WHERE id = ?`, [senderUserId], (err, userResults) => {
+                    if (err || userResults.length === 0) {
+                        console.error("Error fetching user data:", err?.message || "User not found");
                         return;
                     }
 
-                    if (results.length > 0) {
-                        const { receiver_id, sender_id } = results[0];
-                        const targetUserId = senderUserId === sender_id ? receiver_id : sender_id;
-                        const receiverSocketId = userSockets[targetUserId];
+                    const { username, profile_picture } = userResults[0];
 
-                        if (receiverSocketId) {
-                            io.to(receiverSocketId).emit("reaction-received", {
-                                messageId,
-                                senderUserId,
-                                reaction,
-                            });
+                    // Fetch message to determine receiver
+                    db.query(`SELECT receiver_id, sender_id FROM messages WHERE message_id = ?`, [messageId], (err, messageResults) => {
+                        if (err) {
+                            console.error("Error fetching message data:", err.message);
+                            return;
                         }
-                    }
+
+                        if (messageResults.length > 0) {
+                            const { receiver_id, sender_id } = messageResults[0];
+                            const targetUserId = senderUserId === sender_id ? receiver_id : sender_id;
+                            const receiverSocketId = userSockets[targetUserId];
+
+                            if (receiverSocketId) {
+                                const reactionObject = {
+                                    user_id: senderUserId.toString(),
+                                    reaction,
+                                    username,
+                                    profile_picture,
+                                };
+
+                                io.to(receiverSocketId).emit("reaction-received", {
+                                    messageId,
+                                    reaction: reactionObject,
+                                });
+                            }
+                        }
+                    });
                 });
             });
         });

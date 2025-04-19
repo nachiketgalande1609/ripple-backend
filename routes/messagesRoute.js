@@ -94,14 +94,21 @@ router.get("/fetch-users", (req, res) => {
     );
 });
 
-router.get("/fetch-messages", (req, res) => {
+router.get("/fetch-messages", async (req, res) => {
     const currentUserId = req.headers["x-current-user-id"];
     const selectedUserId = req.query.selectedUserId;
-    const limit = parseInt(req.query.limit) || 20; // Default limit to 20 messages
-    const offset = parseInt(req.query.offset) || 0; // Default offset to 0
+    const limit = parseInt(req.query.limit) || 20;
+    const offset = parseInt(req.query.offset) || 0;
 
-    db.query(
-        `
+    if (!currentUserId || !selectedUserId) {
+        return res.status(400).json({
+            success: false,
+            error: "Missing required fields: currentUserId or selectedUserId",
+            data: null,
+        });
+    }
+
+    const query = `
         SELECT 
             m.message_id, m.sender_id, m.receiver_id, m.message_text, 
             m.file_url, m.timestamp, m.delivered, m.delivered_timestamp, 
@@ -118,68 +125,127 @@ router.get("/fetch-messages", (req, res) => {
         WHERE (m.sender_id = ? AND m.receiver_id = ?) OR (m.sender_id = ? AND m.receiver_id = ?)
         ORDER BY m.timestamp DESC, m.message_id DESC
         LIMIT ? OFFSET ?;
-    `,
-        [currentUserId, selectedUserId, selectedUserId, currentUserId, limit, offset],
-        (messagesErr, messagesResults) => {
-            if (messagesErr) {
-                return res.status(500).json({
-                    success: false,
-                    error: messagesErr.message,
-                    data: null,
+    `;
+
+    try {
+        const [messagesResults] = await db.promise().query(query, [currentUserId, selectedUserId, selectedUserId, currentUserId, limit, offset]);
+
+        // Extract all user IDs from reactions
+        const allUserIds = new Set();
+        messagesResults.forEach((msg) => {
+            if (msg.reactions) {
+                let reactions = msg.reactions;
+
+                if (typeof reactions === "string") {
+                    try {
+                        reactions = JSON.parse(reactions);
+                    } catch (error) {
+                        console.error("Error parsing reactions JSON:", error);
+                        return;
+                    }
+                }
+
+                Object.keys(reactions).forEach((userId) => {
+                    allUserIds.add(userId);
+                });
+            }
+        });
+
+        // Fetch user data if there are any user IDs
+        const userIds = Array.from(allUserIds);
+        let userMap = {};
+        if (userIds.length > 0) {
+            const [usersResults] = await db.promise().query(`SELECT id, username, profile_picture FROM users WHERE id IN (?);`, [userIds]);
+
+            userMap = usersResults.reduce((acc, user) => {
+                acc[user.id] = user;
+                return acc;
+            }, {});
+        }
+
+        // Organize messages
+        const groupedMessages = messagesResults.reduce((acc, msg) => {
+            const chatPartnerId = msg.sender_id === parseInt(currentUserId) ? msg.receiver_id : msg.sender_id;
+
+            if (!acc[chatPartnerId]) {
+                acc[chatPartnerId] = [];
+            }
+
+            // Parse and map reactions
+            let reactionsWithUserData = [];
+            if (msg.reactions) {
+                let reactions = msg.reactions;
+
+                if (typeof reactions === "string") {
+                    try {
+                        reactions = JSON.parse(reactions);
+                    } catch (error) {
+                        console.error("Error parsing reactions JSON:", error);
+                        return;
+                    }
+                }
+
+                reactionsWithUserData = Object.keys(reactions).map((userId) => {
+                    const user = userMap[userId];
+                    return {
+                        user_id: userId,
+                        reaction: reactions[userId],
+                        username: user ? user.username : null,
+                        profile_picture: user ? user.profile_picture : null,
+                    };
                 });
             }
 
-            // Organize messages by user
-            const groupedMessages = {};
-            messagesResults.forEach((msg) => {
-                const chatPartnerId = msg.sender_id === parseInt(currentUserId) ? msg.receiver_id : msg.sender_id;
-
-                if (!groupedMessages[chatPartnerId]) {
-                    groupedMessages[chatPartnerId] = [];
-                }
-
-                groupedMessages[chatPartnerId].push({
-                    message_id: msg.message_id,
-                    sender_id: msg.sender_id,
-                    receiver_id: msg.receiver_id,
-                    message_text: msg.message_text,
-                    file_url: msg.file_url,
-                    timestamp: msg.timestamp,
-                    delivered: msg.delivered,
-                    read: msg.is_read,
-                    delivered_timestamp: msg.delivered_timestamp,
-                    read_timestamp: msg.read_timestamp,
-                    file_name: msg.file_name,
-                    file_size: msg.file_size,
-                    reply_to: msg.reply_to,
-                    media_width: msg.media_width,
-                    media_height: msg.media_height,
-                    reactions: msg.reactions,
-                    saved: true,
-                    post: msg.post_id
-                        ? {
-                              post_id: msg.post_id,
-                              file_url: msg.post_file_url,
-                              media_width: msg.post_media_width,
-                              media_height: msg.post_media_height,
-                              content: msg.post_content,
-                              owner: {
-                                  user_id: msg.post_owner_id,
-                                  username: msg.post_owner_username,
-                                  profile_picture: msg.post_owner_profile_picture,
-                              },
-                          }
-                        : null,
-                });
+            acc[chatPartnerId].push({
+                message_id: msg.message_id,
+                sender_id: msg.sender_id,
+                receiver_id: msg.receiver_id,
+                message_text: msg.message_text,
+                file_url: msg.file_url,
+                timestamp: msg.timestamp,
+                delivered: msg.delivered,
+                read: msg.is_read,
+                delivered_timestamp: msg.delivered_timestamp,
+                read_timestamp: msg.read_timestamp,
+                file_name: msg.file_name,
+                file_size: msg.file_size,
+                reply_to: msg.reply_to,
+                media_width: msg.media_width,
+                media_height: msg.media_height,
+                reactions: reactionsWithUserData,
+                saved: true,
+                post: msg.post_id
+                    ? {
+                          post_id: msg.post_id,
+                          file_url: msg.post_file_url,
+                          media_width: msg.post_media_width,
+                          media_height: msg.post_media_height,
+                          content: msg.post_content,
+                          owner: {
+                              user_id: msg.post_owner_id,
+                              username: msg.post_owner_username,
+                              profile_picture: msg.post_owner_profile_picture,
+                          },
+                      }
+                    : null,
             });
 
-            return res.json({
-                success: true,
-                data: groupedMessages[selectedUserId] || [],
-                error: null,
-            });
-        }
-    );
+            return acc;
+        }, {});
+
+        res.status(200).json({
+            success: true,
+            data: groupedMessages[selectedUserId] || [],
+            error: null,
+        });
+    } catch (err) {
+        console.error("Error fetching messages:", err);
+        res.status(500).json({
+            success: false,
+            error: err.message,
+            data: null,
+        });
+    }
 });
 
 router.post("/send-media", upload.single("image"), async (req, res) => {
