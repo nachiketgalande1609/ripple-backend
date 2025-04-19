@@ -86,11 +86,13 @@ router.post("/like-post", async (req, res) => {
                 });
             }
 
-            const notificationMessage = `liked your post.`;
+            if (currentUserId != postAuthorId) {
+                const notificationMessage = `liked your post.`;
 
-            await createNotification(postAuthorId, currentUserId, "like", notificationMessage, postId);
-            emitUnreadNotificationCount(postAuthorId);
-            emitNotifications(postAuthorId, notificationMessage);
+                await createNotification(postAuthorId, currentUserId, "like", notificationMessage, postId);
+                emitUnreadNotificationCount(postAuthorId);
+                emitNotifications(postAuthorId, notificationMessage);
+            }
 
             const likeCountResult = await dbQuery("SELECT COUNT(*) AS like_count FROM likes WHERE post_id = ?", [postId]);
 
@@ -149,10 +151,12 @@ router.post("/submit-post-comment", async (req, res) => {
             });
         }
 
-        const notificationMessage = `commented on your post: "${comment}"`;
+        if (postAuthorId != currentUserId) {
+            const notificationMessage = `commented on your post: "${comment}"`;
 
-        await createNotification(postAuthorId, currentUserId, "comment", notificationMessage, postId, commentId);
-        emitUnreadNotificationCount(postAuthorId);
+            await createNotification(postAuthorId, currentUserId, "comment", notificationMessage, postId, commentId);
+            emitUnreadNotificationCount(postAuthorId);
+        }
 
         return res.status(201).json({
             success: true,
@@ -843,11 +847,13 @@ router.post("/like-comment", async (req, res) => {
                 });
             }
 
-            const notificationMessage = "liked your comment.";
+            if (currentUserId != commentAuthorId) {
+                const notificationMessage = "liked your comment.";
 
-            await createNotification(commentAuthorId, currentUserId, "comment_like", notificationMessage, postId, commentId);
-            emitUnreadNotificationCount(commentAuthorId);
-            emitNotifications(commentAuthorId, notificationMessage);
+                await createNotification(commentAuthorId, currentUserId, "comment_like", notificationMessage, postId, commentId);
+                emitUnreadNotificationCount(commentAuthorId);
+                emitNotifications(commentAuthorId, notificationMessage);
+            }
 
             const countResult = await dbQuery("SELECT COUNT(*) AS like_count FROM comment_likes WHERE comment_id = ?", [commentId]);
 
