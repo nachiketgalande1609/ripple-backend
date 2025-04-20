@@ -561,9 +561,8 @@ router.post("/create-post", upload.single("image"), async (req, res) => {
 });
 
 // Update Post
-router.post("/update/:postId", async (req, res) => {
-    const { postId } = req.params;
-    const { content } = req.body;
+router.post("/update-post", async (req, res) => {
+    const { postId, content } = req.body;
 
     if (!content) {
         return res.status(400).json({
