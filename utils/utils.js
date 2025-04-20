@@ -24,7 +24,7 @@ function createNotification(userId, senderId, type, message, postId = null, comm
     return new Promise((resolve, reject) => {
         const insertNotificationQuery = `
             INSERT INTO notifications (user_id, sender_id, type, message, post_id, comment_id, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, NOW());
+            VALUES (?, ?, ?, ?, ?, ?, CONVERT_TZ(NOW(), 'UTC', 'Asia/Kolkata'));
         `;
 
         db.query(insertNotificationQuery, [userId, senderId, type, message, postId, commentId], (err, result) => {

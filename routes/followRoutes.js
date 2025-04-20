@@ -42,7 +42,7 @@ router.post("/", async (req, res) => {
         await db.promise().query(
             `INSERT INTO notifications 
              (user_id, sender_id, type, message, follow_request_id, created_at)
-             VALUES (?, ?, 'follow_request', ?, ?, NOW())`,
+             VALUES (?, ?, 'follow_request', ?, ?, CONVERT_TZ(NOW(), 'UTC', 'Asia/Kolkata'))`,
             [followingId, followerId, "has sent you a follow request.", result.insertId]
         );
 
@@ -139,7 +139,7 @@ router.post("/response", async (req, res) => {
             // Create acceptance notification
             await db.promise().query(
                 `INSERT INTO notifications (user_id, sender_id, type, message, created_at)
-                 VALUES (?, ?, 'follow_accepted', ?, NOW())`,
+                 VALUES (?, ?, 'follow_accepted', ?, CONVERT_TZ(NOW(), 'UTC', 'Asia/Kolkata'))`,
                 [follower_id, following_id, "accepted your follow request."]
             );
 

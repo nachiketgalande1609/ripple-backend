@@ -49,7 +49,10 @@ router.post("/like-post", async (req, res) => {
             });
         } else {
             // Like the post
-            await dbQuery("INSERT INTO likes (user_id, post_id, created_at) VALUES (?, ?, NOW())", [currentUserId, postId]);
+            await dbQuery("INSERT INTO likes (user_id, post_id, created_at) VALUES (?, ?, CONVERT_TZ(NOW(), 'UTC', 'Asia/Kolkata'))", [
+                currentUserId,
+                postId,
+            ]);
 
             const postResult = await dbQuery("SELECT user_id FROM posts WHERE id = ?", [postId]);
 
@@ -824,7 +827,10 @@ router.post("/like-comment", async (req, res) => {
             });
         } else {
             // Like
-            await dbQuery("INSERT INTO comment_likes (user_id, comment_id, created_at) VALUES (?, ?, NOW())", [currentUserId, commentId]);
+            await dbQuery("INSERT INTO comment_likes (user_id, comment_id, created_at) VALUES (?, ?, CONVERT_TZ(NOW(), 'UTC', 'Asia/Kolkata'))", [
+                currentUserId,
+                commentId,
+            ]);
 
             const commentResult = await dbQuery("SELECT user_id, post_id FROM comments WHERE id = ?", [commentId]);
 

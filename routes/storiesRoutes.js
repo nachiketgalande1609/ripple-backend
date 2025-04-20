@@ -61,7 +61,7 @@ router.get("/fetch-user-stories", async (req, res) => {
             LEFT JOIN users viewer ON v.user_id = viewer.id
             WHERE (f.follower_id = ? OR s.user_id = ?)
             AND s.is_active = 1
-            AND (s.expires_at IS NULL OR s.expires_at > NOW())
+            AND (s.expires_at IS NULL OR s.expires_at > CONVERT_TZ(NOW(), 'UTC', 'Asia/Kolkata'))
             GROUP BY s.id, u.id
             ORDER BY s.created_at DESC
         `;
