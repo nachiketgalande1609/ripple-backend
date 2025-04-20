@@ -62,18 +62,7 @@ db.connect((err) => {
     console.log("Connected to the database.");
 });
 
-// Initialize Socket.io
 initializeSocket(server, db);
-
-// Sample route
-app.get("/", (req, res) => {
-    res.send("Welcome to the Social Media API");
-});
-
-// Start the server
-// server.listen(port, () => {
-//     console.log(`Server running on port ${port}`);
-// });
 
 server.listen(port, "0.0.0.0", () => {
     console.log(`Server running on port ${port}`);
