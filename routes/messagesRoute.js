@@ -25,11 +25,14 @@ const s3 = new S3Client({
 });
 
 // Get all messages and users for the current user
-router.get("/fetch-users", (req, res) => {
+const util = require("util");
+const dbQuery = util.promisify(db.query).bind(db);
+
+router.get("/fetch-users", async (req, res) => {
     const currentUserId = req.headers["x-current-user-id"];
 
-    db.query(
-        `
+    try {
+        const query = `
             SELECT DISTINCT 
                 u.id, 
                 u.username, 
@@ -74,24 +77,32 @@ router.get("/fetch-users", (req, res) => {
                 (m.sender_id = ? OR m.receiver_id = ?) AND 
                 u.id != ?
             ORDER BY u.username;
-        `,
-        [currentUserId, currentUserId, currentUserId, currentUserId, currentUserId, currentUserId, currentUserId, currentUserId],
-        (usersErr, usersResults) => {
-            if (usersErr) {
-                return res.status(500).json({
-                    success: false,
-                    error: usersErr.message,
-                    data: null,
-                });
-            }
+        `;
 
-            return res.json({
-                success: true,
-                data: usersResults,
-                error: null,
-            });
-        }
-    );
+        const usersResults = await dbQuery(query, [
+            currentUserId,
+            currentUserId,
+            currentUserId,
+            currentUserId,
+            currentUserId,
+            currentUserId,
+            currentUserId,
+            currentUserId,
+        ]);
+
+        return res.json({
+            success: true,
+            data: usersResults,
+            error: null,
+        });
+    } catch (err) {
+        console.error("Error fetching users:", err);
+        return res.status(500).json({
+            success: false,
+            error: err.message,
+            data: null,
+        });
+    }
 });
 
 router.get("/fetch-messages", async (req, res) => {
@@ -128,6 +139,7 @@ router.get("/fetch-messages", async (req, res) => {
     `;
 
     try {
+        // Fetch the messages
         const [messagesResults] = await db.promise().query(query, [currentUserId, selectedUserId, selectedUserId, currentUserId, limit, offset]);
 
         // Extract all user IDs from reactions
@@ -163,7 +175,7 @@ router.get("/fetch-messages", async (req, res) => {
             }, {});
         }
 
-        // Organize messages
+        // Organize messages by chat partner
         const groupedMessages = messagesResults.reduce((acc, msg) => {
             const chatPartnerId = msg.sender_id === parseInt(currentUserId) ? msg.receiver_id : msg.sender_id;
 
@@ -233,6 +245,7 @@ router.get("/fetch-messages", async (req, res) => {
             return acc;
         }, {});
 
+        // Respond with the grouped messages
         res.status(200).json({
             success: true,
             data: groupedMessages[selectedUserId] || [],
@@ -266,10 +279,10 @@ router.post("/send-media", upload.single("image"), async (req, res) => {
     let mediaHeight = null;
 
     let resizedMediaBuffer;
-    let tempFilePath;
 
     try {
         if (fileType.startsWith("image/")) {
+            // Process image file
             const image = sharp(file.buffer);
             image.resize({ width: 1080 });
             resizedMediaBuffer = await image.toBuffer();
@@ -278,11 +291,11 @@ router.post("/send-media", upload.single("image"), async (req, res) => {
             mediaWidth = metadata.width;
             mediaHeight = metadata.height;
         } else if (fileType.startsWith("video/")) {
+            // Process video file
             const tempInputPath = path.join(os.tmpdir(), `${Date.now()}_${fileName}`);
             fs.writeFileSync(tempInputPath, file.buffer);
 
             const tempOutputPath = path.join(os.tmpdir(), `resized_${Date.now()}_${fileName}`);
-
             await new Promise((resolve, reject) => {
                 ffmpeg(tempInputPath)
                     .outputOptions([
@@ -301,6 +314,7 @@ router.post("/send-media", upload.single("image"), async (req, res) => {
 
             resizedMediaBuffer = fs.readFileSync(tempOutputPath);
 
+            // Get video metadata (width and height)
             await new Promise((resolve, reject) => {
                 ffmpeg.ffprobe(tempOutputPath, (err, metadata) => {
                     if (err) {
@@ -317,6 +331,7 @@ router.post("/send-media", upload.single("image"), async (req, res) => {
             fs.unlinkSync(tempInputPath);
             fs.unlinkSync(tempOutputPath);
         } else {
+            // Non-image and non-video file type (handle as generic file)
             resizedMediaBuffer = file.buffer;
         }
     } catch (err) {
@@ -328,6 +343,7 @@ router.post("/send-media", upload.single("image"), async (req, res) => {
         });
     }
 
+    // Upload media to S3
     const uploadParams = {
         Bucket: process.env.AWS_S3_BUCKET_NAME,
         Key: `chat/${Date.now()}_${fileName}`,
@@ -378,59 +394,45 @@ router.delete("/delete-message", async (req, res) => {
 
     try {
         // Check if message exists
-        db.query("SELECT file_url FROM messages WHERE message_id = ?", [messageId], async (err, results) => {
-            if (err) {
-                return res.status(500).json({
-                    success: false,
-                    error: err.message,
-                    data: null,
-                });
-            }
+        const [results] = await db.promise().query("SELECT file_url FROM messages WHERE message_id = ?", [messageId]);
 
-            if (results.length === 0) {
-                return res.status(404).json({
-                    success: false,
-                    error: "Message not found.",
-                    data: null,
-                });
-            }
-
-            const fileUrl = results[0].file_url;
-
-            // Delete message from database
-            db.query("DELETE FROM messages WHERE message_id = ?", [messageId], async (deleteErr) => {
-                if (deleteErr) {
-                    return res.status(500).json({
-                        success: false,
-                        error: deleteErr.message,
-                        data: null,
-                    });
-                }
-
-                // If there's a file attached, delete it from S3
-                if (fileUrl) {
-                    const key = fileUrl.split(".amazonaws.com/")[1]; // Extract S3 object key
-
-                    const deleteParams = {
-                        Bucket: process.env.AWS_S3_BUCKET_NAME,
-                        Key: key,
-                    };
-
-                    try {
-                        await s3.send(new DeleteObjectCommand(deleteParams));
-                    } catch (s3Error) {
-                        console.error("S3 Deletion Error:", s3Error);
-                    }
-                }
-
-                return res.json({
-                    success: true,
-                    error: null,
-                    data: "Message deleted successfully.",
-                });
+        if (results.length === 0) {
+            return res.status(404).json({
+                success: false,
+                error: "Message not found.",
+                data: null,
             });
+        }
+
+        const fileUrl = results[0].file_url;
+
+        // Delete message from database
+        await db.promise().query("DELETE FROM messages WHERE message_id = ?", [messageId]);
+
+        // If there's a file attached, delete it from S3
+        if (fileUrl) {
+            const key = fileUrl.split(".amazonaws.com/")[1]; // Extract S3 object key
+
+            const deleteParams = {
+                Bucket: process.env.AWS_S3_BUCKET_NAME,
+                Key: key,
+            };
+
+            try {
+                await s3.send(new DeleteObjectCommand(deleteParams));
+            } catch (s3Error) {
+                console.error("S3 Deletion Error:", s3Error);
+                // Handle S3 deletion error gracefully (still return message deletion success)
+            }
+        }
+
+        return res.json({
+            success: true,
+            error: null,
+            data: "Message deleted successfully.",
         });
     } catch (error) {
+        console.error("Error in delete-message route:", error);
         return res.status(500).json({
             success: false,
             error: error.message,
