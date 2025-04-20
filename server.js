@@ -35,7 +35,7 @@ const storiesRoutes = require("./routes/storiesRoutes");
 
 app.use("/api/auth", authRoutes);
 
-// app.use(authMiddleware);
+app.use(authMiddleware);
 
 app.use("/api/users", userRoutes);
 app.use("/api/follow", followRoutes);
