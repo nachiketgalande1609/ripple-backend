@@ -186,4 +186,53 @@ router.get("/fetch-following-list", async (req, res) => {
     }
 });
 
+// Cancel follow request
+router.delete("/cancel-request", async (req, res) => {
+    const { followerId, followingId } = req.body;
+
+    if (!followerId || !followingId) {
+        return res.status(400).json({
+            success: false,
+            error: "Missing required fields",
+            data: null,
+        });
+    }
+
+    try {
+        // Delete the pending follow request
+        const [result] = await db.promise().query(
+            `DELETE FROM follow_requests 
+             WHERE follower_id = ? AND following_id = ? AND status = 'pending'`,
+            [followerId, followingId]
+        );
+
+        if (result.affectedRows === 0) {
+            return res.status(404).json({
+                success: false,
+                error: "No pending follow request found",
+                data: null,
+            });
+        }
+
+        // Optionally delete the related notification
+        await db.promise().query(
+            `DELETE FROM notifications 
+             WHERE sender_id = ? AND user_id = ? AND type = 'follow_request'`,
+            [followerId, followingId]
+        );
+
+        res.status(200).json({
+            success: true,
+            error: null,
+            data: { message: "Follow request canceled" },
+        });
+    } catch (err) {
+        res.status(500).json({
+            success: false,
+            error: err.message,
+            data: null,
+        });
+    }
+});
+
 module.exports = router;
