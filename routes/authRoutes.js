@@ -524,20 +524,20 @@ router.post("/reset-password", async (req, res) => {
 });
 
 const logTrafficData = async (userData) => {
-    const { ip, userAgent, location, referrer } = userData;
+    const { ip, userAgent, location, referrer, platform } = userData;
 
     try {
         // Check if the IP already exists in the database
-        const checkQuery = `SELECT COUNT(*) AS count FROM website_traffic WHERE ip = ?`;
-        const result = await dbQuery(checkQuery, [ip]);
+        const checkQuery = `SELECT COUNT(*) AS count FROM website_traffic WHERE ip = ? AND platform = ?`;
+        const result = await dbQuery(checkQuery, [ip, platform]);
 
         if (result[0].count === 0) {
             // If the IP doesn't exist, insert the traffic data
             const insertQuery = `
-                INSERT INTO website_traffic (ip, user_agent, location, referrer, timestamp)
-                VALUES (?, ?, ?, ?, NOW())
+                INSERT INTO website_traffic (ip, user_agent, location, referrer, timestamp, platform)
+                VALUES (?, ?, ?, ?, NOW(), ?)
             `;
-            await dbQuery(insertQuery, [ip, userAgent, location, referrer]);
+            await dbQuery(insertQuery, [ip, userAgent, location, referrer, platform]);
         } else {
             console.log(`IP ${ip} already logged.`);
         }
@@ -549,7 +549,7 @@ const logTrafficData = async (userData) => {
 // Route to track traffic
 router.post("/log", async (req, res) => {
     try {
-        const { ip, userAgent, location, referrer } = req.body;
+        const { ip, userAgent, location, referrer, platform } = req.body;
 
         // Use useragent library to parse user agent string
         const agent = useragent.parse(userAgent);
@@ -562,6 +562,7 @@ router.post("/log", async (req, res) => {
             userAgent: `${browser} on ${os}`,
             location,
             referrer,
+            platform,
         });
 
         return res.status(200).json({
