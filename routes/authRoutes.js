@@ -5,6 +5,7 @@ const db = require("../db");
 const router = express.Router();
 const { sendEmail } = require("../utils/mailer");
 const crypto = require("crypto");
+const useragent = require("useragent");
 
 const { OAuth2Client } = require("google-auth-library");
 const client = new OAuth2Client("702353220748-2lmc03lb4tcfnuqds67h8bbupmb1aa0q.apps.googleusercontent.com");
@@ -518,6 +519,60 @@ router.post("/reset-password", async (req, res) => {
             success: false,
             error: "Internal error while resetting password.",
             data: null,
+        });
+    }
+});
+
+const logTrafficData = async (userData) => {
+    const { ip, userAgent, location, referrer } = userData;
+
+    try {
+        // Check if the IP already exists in the database
+        const checkQuery = `SELECT COUNT(*) AS count FROM website_traffic WHERE ip = ?`;
+        const result = await dbQuery(checkQuery, [ip]);
+
+        if (result[0].count === 0) {
+            // If the IP doesn't exist, insert the traffic data
+            const insertQuery = `
+                INSERT INTO website_traffic (ip, user_agent, location, referrer, timestamp)
+                VALUES (?, ?, ?, ?, NOW())
+            `;
+            await dbQuery(insertQuery, [ip, userAgent, location, referrer]);
+        } else {
+            console.log(`IP ${ip} already logged.`);
+        }
+    } catch (err) {
+        console.error("Error logging traffic data:", err);
+    }
+};
+
+// Route to track traffic
+router.post("/log", async (req, res) => {
+    try {
+        const { ip, userAgent, location, referrer } = req.body;
+
+        // Use useragent library to parse user agent string
+        const agent = useragent.parse(userAgent);
+        const browser = agent.toAgent();
+        const os = agent.os.toString();
+
+        // Log the data (this could be to a database or a file)
+        await logTrafficData({
+            ip,
+            userAgent: `${browser} on ${os}`,
+            location,
+            referrer,
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: "Traffic data logged successfully",
+        });
+    } catch (err) {
+        console.error("Error tracking traffic:", err);
+        return res.status(500).json({
+            success: false,
+            message: "Error tracking traffic",
         });
     }
 });
