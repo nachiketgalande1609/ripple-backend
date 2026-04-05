@@ -2,27 +2,27 @@ const express = require("express");
 const { promisePool: db } = require("../db");
 const router = express.Router();
 
-router.patch("/update-account-privacy", (req, res) => {
+router.patch("/update-account-privacy", async (req, res) => {
+  try {
     const currentUserId = req.headers["x-current-user-id"];
     const { isPrivate } = req.body;
 
-    query = "UPDATE users SET is_private=? WHERE id=?";
+    const query = "UPDATE users SET is_private=? WHERE id=?";
 
-    db.query(query, [isPrivate, currentUserId], (updateErr) => {
-        if (updateErr) {
-            return res.status(500).json({
-                success: false,
-                error: updateErr.message,
-                data: null,
-            });
-        }
+    await db.query(query, [isPrivate, currentUserId]);
 
-        res.status(200).json({
-            success: true,
-            error: null,
-            data: { message: "privacy updated successfully" },
-        });
+    return res.status(200).json({
+      success: true,
+      error: null,
+      data: { message: "privacy updated successfully" },
     });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error.message,
+      data: null,
+    });
+  }
 });
 
 module.exports = router;

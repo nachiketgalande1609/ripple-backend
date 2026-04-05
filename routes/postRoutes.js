@@ -920,6 +920,7 @@ async function fetchPostDetails(userId, postId, currentUserId, res) {
         const postQuery = `
             SELECT
                 p.id,
+                p.user_id,
                 u.username,
                 u.profile_picture,
                 p.file_url,
