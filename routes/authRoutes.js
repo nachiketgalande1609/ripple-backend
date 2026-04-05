@@ -538,9 +538,10 @@ const logTrafficData = async (userData) => {
                 VALUES (?, ?, ?, ?, NOW(), ?)
             `;
             await dbQuery(insertQuery, [ip, userAgent, location, referrer, platform]);
-        } else {
-            console.log(`IP ${ip} already logged.`);
         }
+        // else {
+        //     console.log(`IP ${ip} already logged.`);
+        // }
     } catch (err) {
         console.error("Error logging traffic data:", err);
     }

@@ -46,16 +46,18 @@ function initializeSocket(server, db) {
                                             });
                                         }
                                     });
-                                }
+                                },
                             );
                         }
-                    }
+                    },
                 );
             }
         });
 
         // Handle sending messages
         socket.on("sendMessage", (data) => {
+            console.log("Message received");
+
             const { senderId, receiverId, text, tempId, fileUrl, fileName, fileSize, replyTo, mediaWidth, mediaHeight, postId } = data;
 
             const receiverSocketId = userSockets[receiverId];
@@ -112,10 +114,10 @@ function initializeSocket(server, db) {
                                     deliveredTimestamp: deliveredTimestamp ? deliveredTimestamp.toISOString() : null,
                                     timestamp: new Date().toISOString(),
                                 });
-                            }
+                            },
                         );
                     }
-                }
+                },
             );
         });
 
@@ -155,7 +157,7 @@ function initializeSocket(server, db) {
                             });
                         }
                     });
-                }
+                },
             );
         });
 
