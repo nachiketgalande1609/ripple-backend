@@ -15,6 +15,8 @@ function initializeSocket(server, db) {
 
     io.on("connection", (socket) => {
         socket.on("registerUser", async (userId) => {
+            console.log("registerUser called | userId:", userId, "| type:", typeof userId);
+            console.log("userSockets before:", JSON.stringify(userSockets));
             if (userSockets[userId] !== socket.id) {
                 userSockets[userId] = socket.id;
 
@@ -240,9 +242,20 @@ function initializeSocket(server, db) {
 
         socket.on("callUser", (data) => {
             const { from, to, signal, callerUsername, callerProfilePicture } = data;
+
+            console.log("=== callUser fired ===");
+            console.log("from:", from, "| type:", typeof from);
+            console.log("to:", to, "| type:", typeof to);
+            console.log("userSockets at call time:", JSON.stringify(userSockets));
+
             const receiverSocketId = userSockets[to];
+            console.log("resolved receiverSocketId:", receiverSocketId); // undefined = key mismatch
+
             if (receiverSocketId) {
                 io.to(receiverSocketId).emit("callReceived", { signal, from, callerUsername, callerProfilePicture });
+                console.log("callReceived emitted to:", receiverSocketId);
+            } else {
+                console.warn("Receiver not found in userSockets for userId:", to);
             }
         });
 

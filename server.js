@@ -41,6 +41,10 @@ app.use("/api/settings", settingsRoutes);
 app.use("/api/messages", messagesRoutes);
 app.use("/api/stories", storiesRoutes);
 
+app.get("/debug/sockets", (req, res) => {
+    res.json(getUserSockets());
+});
+
 // ✅ Use the shared promise pool from db.js
 const { promisePool } = require("./db");
 
