@@ -3,21 +3,43 @@ const { getIo, getUserSockets } = require("../socket");
 
 const getTimeAgo = (createdAt) => {
     const now = new Date();
-    const diffInSeconds = Math.floor((now - createdAt) / 1000);
+    const createdDate = new Date(createdAt);
+
+    const diffInSeconds = Math.floor((now - createdDate) / 1000);
 
     if (diffInSeconds < 60) return `${diffInSeconds} sec ago`;
+
     const diffInMinutes = Math.floor(diffInSeconds / 60);
     if (diffInMinutes < 60) return `${diffInMinutes} min ago`;
+
     const diffInHours = Math.floor(diffInMinutes / 60);
     if (diffInHours < 24) return `${diffInHours} hr ago`;
+
     const diffInDays = Math.floor(diffInHours / 24);
     if (diffInDays < 7) return `${diffInDays} days ago`;
+
     const diffInWeeks = Math.floor(diffInDays / 7);
     if (diffInWeeks < 4) return `${diffInWeeks} weeks ago`;
-    const diffInMonths = Math.floor(diffInDays / 30);
-    if (diffInMonths < 12) return `${diffInMonths} months ago`;
-    const diffInYears = Math.floor(diffInDays / 365);
-    return `${diffInYears} years ago`;
+
+    let years = now.getFullYear() - createdDate.getFullYear();
+    let months = now.getMonth() - createdDate.getMonth();
+
+    // ✅ adjust based on day
+    if (now.getDate() < createdDate.getDate()) {
+        months--;
+    }
+
+    // normalize negative months
+    if (months < 0) {
+        years--;
+        months += 12;
+    }
+
+    if (years === 0) {
+        return `${months} months ago`;
+    }
+
+    return `${years} years ago`;
 };
 
 function createNotification(userId, senderId, type, message, postId = null, commentId = null) {

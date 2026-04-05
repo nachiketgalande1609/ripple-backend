@@ -58,7 +58,7 @@ router.post("/register", async (req, res) => {
             VALUES (?, ?, ?, ?, ?, NULL)
         `;
 
-        await dbQuery(insertQuery, [username, email, hashedPassword, verificationToken, tokenExpiry]);
+        await db.query(insertQuery, [username, email, hashedPassword, verificationToken, tokenExpiry]);
 
         const verificationLink = `${process.env.FRONTEND_URL}/verify-account?token=${verificationToken}`;
 
@@ -117,7 +117,7 @@ router.post("/login", async (req, res) => {
     `;
 
     try {
-        const results = await dbQuery(query, [email]);
+        const [results] = await db.query(query, [email]);
 
         if (results.length === 0) {
             return res.status(400).json({
@@ -186,7 +186,7 @@ router.post("/google-login", async (req, res) => {
 
         // Check if the user already exists in your database
         const query = "SELECT id, username, email, profile_picture FROM users WHERE email = ?";
-        const results = await dbQuery(query, [email]);
+        const [results] = await db.query(query, [email]);
 
         let user = results[0];
 
@@ -199,11 +199,11 @@ router.post("/google-login", async (req, res) => {
             `;
             const insertValues = [username, email, firstName, lastName, payload.picture, new Date(), null];
 
-            const insertResult = await dbQuery(insertQuery, insertValues);
+            const [insertResult] = await db.query(insertQuery, insertValues);
 
             const newUserId = insertResult.insertId;
             const userQuery = "SELECT id, username, email, profile_picture FROM users WHERE id = ?";
-            const newUserResults = await dbQuery(userQuery, [newUserId]);
+            const [newUserResults] = await db.query(userQuery, [newUserId]);
 
             user = newUserResults[0];
         }
@@ -261,7 +261,7 @@ router.get("/verify", async (req, res) => {
 
     try {
         const query = "SELECT * FROM users WHERE verification_token = ?";
-        const results = await dbQuery(query, [token]);
+        const [results] = await db.query(query, [token]);
 
         if (results.length === 0) {
             return res.status(400).json({
@@ -286,7 +286,7 @@ router.get("/verify", async (req, res) => {
         }
 
         const update = "UPDATE users SET is_verified = true WHERE id = ?";
-        await dbQuery(update, [user.id]);
+        await db.query(update, [user.id]);
 
         return res.json({
             success: true,
@@ -317,7 +317,7 @@ router.post("/generate-otp", async (req, res) => {
     try {
         // Check if user with that email exists
         const checkUserQuery = `SELECT id FROM users WHERE email = ?`;
-        const users = await dbQuery(checkUserQuery, [email]);
+        const [users] = await db.query(checkUserQuery, [email]);
 
         if (users.length === 0) {
             return res.status(404).json({
@@ -339,7 +339,7 @@ router.post("/generate-otp", async (req, res) => {
             SET otp = ?, otp_expiry = ?
             WHERE email = ?
         `;
-        await dbQuery(updateOtpQuery, [otp, expiryTime, email]);
+        await db.query(updateOtpQuery, [otp, expiryTime, email]);
 
         // Send OTP via email
         const otpMessage = `
@@ -400,7 +400,7 @@ router.post("/verify-otp", async (req, res) => {
             FROM users
             WHERE email = ?
         `;
-        const results = await dbQuery(query, [email]);
+        const [results] = await db.query(query, [email]);
 
         if (results.length === 0) {
             return res.status(400).json({
@@ -433,7 +433,7 @@ router.post("/verify-otp", async (req, res) => {
 
         // OTP is valid, update user record
         const updateQuery = "UPDATE users SET is_verified = true WHERE email = ?";
-        await dbQuery(updateQuery, [email]);
+        await db.query(updateQuery, [email]);
 
         return res.json({
             success: true,
@@ -463,7 +463,7 @@ router.post("/reset-password", async (req, res) => {
     try {
         // Query to get OTP and expiry from the database
         const query = `SELECT otp, otp_expiry FROM users WHERE email = ?`;
-        const results = await dbQuery(query, [email]);
+        const [results] = await db.query(query, [email]);
 
         if (results.length === 0) {
             return res.status(400).json({
@@ -503,7 +503,7 @@ router.post("/reset-password", async (req, res) => {
             SET password = ?, otp = NULL, otp_expiry = NULL 
             WHERE email = ?
         `;
-        await dbQuery(updateQuery, [hashedPassword, email]);
+        await db.query(updateQuery, [hashedPassword, email]);
 
         return res.json({
             success: true,
@@ -534,7 +534,7 @@ const logTrafficData = async (userData) => {
                 INSERT INTO website_traffic (ip, user_agent, location, referrer, timestamp, platform)
                 VALUES (?, ?, ?, ?, NOW(), ?)
             `;
-            await dbQuery(insertQuery, [ip, userAgent, location, referrer, platform]);
+            await db.query(insertQuery, [ip, userAgent, location, referrer, platform]);
         }
         // else {
         //     console.log(`IP ${ip} already logged.`);

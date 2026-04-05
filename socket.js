@@ -15,8 +15,6 @@ function initializeSocket(server, db) {
 
     io.on("connection", (socket) => {
         socket.on("registerUser", async (userId) => {
-            console.log("registerUser called | userId:", userId, "| type:", typeof userId);
-            console.log("userSockets before:", JSON.stringify(userSockets));
             if (userSockets[userId] !== socket.id) {
                 userSockets[userId] = socket.id;
 
@@ -220,14 +218,12 @@ function initializeSocket(server, db) {
                 if (!storyOwner) return;
 
                 if (storyOwner.user_id === user_id) {
-                    console.log(`User ${user_id} is viewing their own story ${story_id}. No view registered.`);
                     return;
                 }
 
                 const [existing] = await db.query(`SELECT * FROM story_views WHERE user_id = ? AND story_id = ?`, [user_id, story_id]);
 
                 if (existing.length > 0) {
-                    console.log(`User ${user_id} has already viewed story ${story_id}`);
                     return;
                 }
 
@@ -243,17 +239,10 @@ function initializeSocket(server, db) {
         socket.on("callUser", (data) => {
             const { from, to, signal, callerUsername, callerProfilePicture } = data;
 
-            console.log("=== callUser fired ===");
-            console.log("from:", from, "| type:", typeof from);
-            console.log("to:", to, "| type:", typeof to);
-            console.log("userSockets at call time:", JSON.stringify(userSockets));
-
             const receiverSocketId = userSockets[to];
-            console.log("resolved receiverSocketId:", receiverSocketId); // undefined = key mismatch
 
             if (receiverSocketId) {
                 io.to(receiverSocketId).emit("callReceived", { signal, from, callerUsername, callerProfilePicture });
-                console.log("callReceived emitted to:", receiverSocketId);
             } else {
                 console.warn("Receiver not found in userSockets for userId:", to);
             }

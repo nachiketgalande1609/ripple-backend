@@ -33,13 +33,13 @@ router.post("/like-post", async (req, res) => {
     }
 
     try {
-        const existingLike = await dbQuery("SELECT * FROM likes WHERE user_id = ? AND post_id = ?", [currentUserId, postId]);
+        const [existingLike] = await db.query("SELECT * FROM likes WHERE user_id = ? AND post_id = ?", [currentUserId, postId]);
 
         if (existingLike.length > 0) {
             // Unlike the post
-            await dbQuery("DELETE FROM likes WHERE user_id = ? AND post_id = ?", [currentUserId, postId]);
+            await db.query("DELETE FROM likes WHERE user_id = ? AND post_id = ?", [currentUserId, postId]);
 
-            const likeCountResult = await dbQuery("SELECT COUNT(*) AS like_count FROM likes WHERE post_id = ?", [postId]);
+            const [likeCountResult] = await db.query("SELECT COUNT(*) AS like_count FROM likes WHERE post_id = ?", [postId]);
 
             return res.status(200).json({
                 success: true,
@@ -48,12 +48,12 @@ router.post("/like-post", async (req, res) => {
             });
         } else {
             // Like the post
-            await dbQuery("INSERT INTO likes (user_id, post_id, created_at) VALUES (?, ?, CONVERT_TZ(NOW(), 'UTC', 'Asia/Kolkata'))", [
+            await db.query("INSERT INTO likes (user_id, post_id, created_at) VALUES (?, ?, CONVERT_TZ(NOW(), 'UTC', 'Asia/Kolkata'))", [
                 currentUserId,
                 postId,
             ]);
 
-            const postResult = await dbQuery("SELECT user_id FROM posts WHERE id = ?", [postId]);
+            const [postResult] = await db.query("SELECT user_id FROM posts WHERE id = ?", [postId]);
 
             const postAuthorId = postResult[0]?.user_id;
 
@@ -67,7 +67,7 @@ router.post("/like-post", async (req, res) => {
 
             // If liking own post
             if (currentUserId === postAuthorId) {
-                const likeCountResult = await dbQuery("SELECT COUNT(*) AS like_count FROM likes WHERE post_id = ?", [postId]);
+                const [likeCountResult] = await db.query("SELECT COUNT(*) AS like_count FROM likes WHERE post_id = ?", [postId]);
 
                 return res.status(200).json({
                     success: true,
@@ -76,7 +76,7 @@ router.post("/like-post", async (req, res) => {
                 });
             }
 
-            const userResult = await dbQuery("SELECT username FROM users WHERE id = ?", [currentUserId]);
+            const [userResult] = await db.query("SELECT username FROM users WHERE id = ?", [currentUserId]);
 
             const userName = userResult[0]?.username;
 
@@ -96,7 +96,7 @@ router.post("/like-post", async (req, res) => {
                 emitNotifications(postAuthorId, notificationMessage);
             }
 
-            const likeCountResult = await dbQuery("SELECT COUNT(*) AS like_count FROM likes WHERE post_id = ?", [postId]);
+            const [likeCountResult] = await db.query("SELECT COUNT(*) AS like_count FROM likes WHERE post_id = ?", [postId]);
 
             return res.status(200).json({
                 success: true,
@@ -126,14 +126,14 @@ router.post("/submit-post-comment", async (req, res) => {
     }
 
     try {
-        const insertResult = await dbQuery(
+        const [insertResult] = await db.query(
             "INSERT INTO comments (user_id, post_id, content, created_at) VALUES (?, ?, ?, CONVERT_TZ(NOW(), 'UTC', 'Asia/Kolkata'))",
             [currentUserId, postId, comment],
         );
 
         const commentId = insertResult.insertId;
 
-        const postResult = await dbQuery("SELECT user_id FROM posts WHERE id = ?", [postId]);
+        const [postResult] = await db.query("SELECT user_id FROM posts WHERE id = ?", [postId]);
 
         const postAuthorId = postResult[0]?.user_id;
 
@@ -189,7 +189,7 @@ router.delete("/delete-comment", async (req, res) => {
 
     try {
         // Check if comment exists and get owner
-        const commentResult = await dbQuery("SELECT user_id FROM comments WHERE id = ?", [commentId]);
+        const [commentResult] = await db.query("SELECT user_id FROM comments WHERE id = ?", [commentId]);
 
         if (commentResult.length === 0) {
             return res.status(404).json({
@@ -210,7 +210,7 @@ router.delete("/delete-comment", async (req, res) => {
         }
 
         // Delete the comment
-        await dbQuery("DELETE FROM comments WHERE id = ?", [commentId]);
+        await db.query("DELETE FROM comments WHERE id = ?", [commentId]);
 
         return res.status(200).json({
             success: true,
@@ -241,11 +241,11 @@ router.post("/save-post", async (req, res) => {
     }
 
     try {
-        const checkSaved = await dbQuery("SELECT 1 FROM saved_posts WHERE user_id = ? AND post_id = ?", [currentUserId, postId]);
+        const [checkSaved] = await db.query("SELECT 1 FROM saved_posts WHERE user_id = ? AND post_id = ?", [currentUserId, postId]);
 
         if (checkSaved.length > 0) {
             // If post already saved, remove it (toggle off)
-            await dbQuery("DELETE FROM saved_posts WHERE user_id = ? AND post_id = ?", [currentUserId, postId]);
+            await db.query("DELETE FROM saved_posts WHERE user_id = ? AND post_id = ?", [currentUserId, postId]);
 
             return res.status(200).json({
                 success: true,
@@ -257,7 +257,7 @@ router.post("/save-post", async (req, res) => {
             });
         } else {
             // If not saved, insert (toggle on)
-            await dbQuery("INSERT INTO saved_posts (user_id, post_id) VALUES (?, ?)", [currentUserId, postId]);
+            await db.query("INSERT INTO saved_posts (user_id, post_id) VALUES (?, ?)", [currentUserId, postId]);
 
             return res.status(200).json({
                 success: true,
@@ -298,7 +298,7 @@ router.get("/fetch-posts", async (req, res) => {
             ORDER BY p.created_at DESC;
         `;
 
-        const postsResult = await dbQuery(postsQuery, [userId, userId, userId]);
+        const [postsResult] = await db.query(postsQuery, [userId, userId, userId]);
         if (!postsResult.length) {
             return res.status(200).json({ success: true, error: null, data: [] });
         }
@@ -315,7 +315,7 @@ router.get("/fetch-posts", async (req, res) => {
             WHERE post_id IN (?)
             GROUP BY post_id;
         `;
-        const likesResult = await dbQuery(likesQuery, [postIds]);
+        const [likesResult] = await db.query(likesQuery, [postIds]);
 
         const likeCounts = likesResult.reduce((acc, like) => {
             acc[like.post_id] = like.like_count;
@@ -328,7 +328,7 @@ router.get("/fetch-posts", async (req, res) => {
             const likedPostsQuery = `
                 SELECT post_id FROM likes WHERE user_id = ? AND post_id IN (?);
             `;
-            const likedPostsResult = await dbQuery(likedPostsQuery, [userId, postIds]);
+            const [likedPostsResult] = await db.query(likedPostsQuery, [userId, postIds]);
             likedPostsByCurrentUser = new Set(likedPostsResult.map((like) => like.post_id));
         }
 
@@ -346,7 +346,7 @@ router.get("/fetch-posts", async (req, res) => {
             GROUP BY c.id
             ORDER BY c.created_at DESC;
         `;
-        const commentsResult = await dbQuery(commentsQuery, [userId, postIds]);
+        const [commentsResult] = await db.query(commentsQuery, [userId, postIds]);
 
         // Organize comments by post_id
         const commentsByPostId = commentsResult.reduce((acc, comment) => {
@@ -393,7 +393,7 @@ router.get("/fetch-profile-posts", async (req, res) => {
     try {
         // Check if the user exists and is private
         const privacyQuery = `SELECT is_private FROM users WHERE id = ?;`;
-        const userResult = await dbQuery(privacyQuery, [userId]);
+        const [userResult] = await db.query(privacyQuery, [userId]);
 
         if (userResult.length === 0) {
             return res.status(404).json({
@@ -403,7 +403,7 @@ router.get("/fetch-profile-posts", async (req, res) => {
             });
         }
 
-        const isPrivate = userResult[0].is_private;
+        const isPrivate = userResult[0].is_private; // ✅ FIX
 
         if (isPrivate && currentUserId != userId) {
             const followCheckQuery = `
@@ -411,7 +411,7 @@ router.get("/fetch-profile-posts", async (req, res) => {
                 FROM followers 
                 WHERE follower_id = ? AND following_id = ?;
             `;
-            const followResult = await dbQuery(followCheckQuery, [currentUserId, userId]);
+            const [followResult] = await db.query(followCheckQuery, [currentUserId, userId]);
 
             if (followResult.length === 0) {
                 return res.status(403).json({
@@ -441,7 +441,7 @@ router.get("/fetch-post-details", async (req, res) => {
     try {
         // Check if user exists and is private
         const privacyQuery = `SELECT is_private FROM users WHERE id = ?;`;
-        const userResult = await dbQuery(privacyQuery, [userId]);
+        const [userResult] = await db.query(privacyQuery, [userId]);
 
         if (userResult.length === 0) {
             return res.status(404).json({
@@ -459,7 +459,7 @@ router.get("/fetch-post-details", async (req, res) => {
                 FROM followers 
                 WHERE follower_id = ? AND following_id = ?;
             `;
-            const followResult = await dbQuery(followCheckQuery, [currentUserId, userId]);
+            const [followResult] = await db.query(followCheckQuery, [currentUserId, userId]);
 
             if (followResult.length === 0) {
                 return res.status(403).json({
@@ -642,7 +642,7 @@ router.delete("/delete-post", async (req, res) => {
         }
 
         const deleteQuery = "DELETE FROM posts WHERE id = ?";
-        await dbQuery(deleteQuery, [postId]);
+        await db.query(deleteQuery, [postId]);
 
         return res.status(200).json({
             success: true,
@@ -703,7 +703,7 @@ router.get("/fetch-saved-posts", async (req, res) => {
             GROUP BY 
                 post_id;
         `;
-        const likesResult = await dbQuery(likesQuery, [postIds]);
+        const [likesResult] = await db.query(likesQuery, [postIds]);
 
         // Create a map of post_id to like_count
         const likeCounts = likesResult.reduce((acc, like) => {
@@ -721,7 +721,7 @@ router.get("/fetch-saved-posts", async (req, res) => {
                 user_id = ? 
                 AND post_id IN (?);
         `;
-        const likedPostsResult = currentUserId ? await dbQuery(likedPostsQuery, [currentUserId, postIds]) : [];
+        const [likedPostsResult] = currentUserId ? await db.query(likedPostsQuery, [currentUserId, postIds]) : [];
 
         const likedPostsByCurrentUser = new Set(likedPostsResult.map((like) => like.post_id));
 
@@ -764,7 +764,7 @@ router.get("/fetch-saved-posts", async (req, res) => {
             ORDER BY 
                 c.created_at DESC;
         `;
-        const commentsResult = await dbQuery(commentsQuery, [currentUserId, postIds]);
+        const [commentsResult] = await db.query(commentsQuery, [currentUserId, postIds]);
 
         // Organize comments by post_id and set timeAgo for each comment
         const commentsByPostId = commentsResult.reduce((acc, comment) => {
@@ -810,13 +810,13 @@ router.post("/like-comment", async (req, res) => {
     }
 
     try {
-        const existingLike = await dbQuery("SELECT * FROM comment_likes WHERE user_id = ? AND comment_id = ?", [currentUserId, commentId]);
+        const [existingLike] = await db.query("SELECT * FROM comment_likes WHERE user_id = ? AND comment_id = ?", [currentUserId, commentId]);
 
         if (existingLike.length > 0) {
             // Unlike
-            await dbQuery("DELETE FROM comment_likes WHERE user_id = ? AND comment_id = ?", [currentUserId, commentId]);
+            await db.query("DELETE FROM comment_likes WHERE user_id = ? AND comment_id = ?", [currentUserId, commentId]);
 
-            const countResult = await dbQuery("SELECT COUNT(*) AS like_count FROM comment_likes WHERE comment_id = ?", [commentId]);
+            const [countResult] = await db.query("SELECT COUNT(*) AS like_count FROM comment_likes WHERE comment_id = ?", [commentId]);
 
             return res.status(200).json({
                 success: true,
@@ -825,12 +825,12 @@ router.post("/like-comment", async (req, res) => {
             });
         } else {
             // Like
-            await dbQuery("INSERT INTO comment_likes (user_id, comment_id, created_at) VALUES (?, ?, CONVERT_TZ(NOW(), 'UTC', 'Asia/Kolkata'))", [
+            await db.query("INSERT INTO comment_likes (user_id, comment_id, created_at) VALUES (?, ?, CONVERT_TZ(NOW(), 'UTC', 'Asia/Kolkata'))", [
                 currentUserId,
                 commentId,
             ]);
 
-            const commentResult = await dbQuery("SELECT user_id, post_id FROM comments WHERE id = ?", [commentId]);
+            const [commentResult] = await db.query("SELECT user_id, post_id FROM comments WHERE id = ?", [commentId]);
 
             const commentAuthorId = commentResult[0]?.user_id;
             const postId = commentResult[0]?.post_id;
@@ -859,7 +859,7 @@ router.post("/like-comment", async (req, res) => {
                 emitNotifications(commentAuthorId, notificationMessage);
             }
 
-            const countResult = await dbQuery("SELECT COUNT(*) AS like_count FROM comment_likes WHERE comment_id = ?", [commentId]);
+            const [countResult] = await db.query("SELECT COUNT(*) AS like_count FROM comment_likes WHERE comment_id = ?", [commentId]);
 
             return res.status(200).json({
                 success: true,
@@ -955,7 +955,7 @@ async function fetchPostDetails(userId, postId, currentUserId, res) {
                 post_id = ?;
         `;
 
-        const likesResult = await dbQuery(likesQuery, [postId]);
+        const [likesResult] = await db.query(likesQuery, [postId]);
         const likeCount = likesResult.length;
 
         const likedByCurrentUser = likesResult.some((like) => like.user_id == currentUserId);
@@ -991,7 +991,7 @@ async function fetchPostDetails(userId, postId, currentUserId, res) {
                 c.created_at DESC;
         `;
 
-        const commentsResult = await dbQuery(commentsQuery, [currentUserId, postId]);
+        const [commentsResult] = await db.query(commentsQuery, [currentUserId, postId]);
 
         commentsResult.forEach((comment) => {
             comment.timeAgo = getTimeAgo(new Date(comment.created_at));

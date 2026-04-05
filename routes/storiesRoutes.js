@@ -29,7 +29,6 @@ router.get("/fetch-user-stories", async (req, res) => {
         });
     }
 
-    // Convert currentUserId to a number for consistent comparison
     const numericUserId = parseInt(currentUserId, 10);
     if (isNaN(numericUserId)) {
         return res.status(400).json({
@@ -66,37 +65,43 @@ router.get("/fetch-user-stories", async (req, res) => {
             ORDER BY s.created_at DESC
         `;
 
-        db.query(query, [numericUserId, numericUserId], (err, results) => {
-            if (err) {
-                return res.status(500).json({
-                    success: false,
-                    error: err.message,
-                    data: null,
-                });
+        // ✅ PROMISE-BASED QUERY
+        const [results] = await db.query(query, [numericUserId, numericUserId]);
+
+        // ✅ Clean viewers (remove null objects)
+        const processedResults = results.map((story) => {
+            let viewers = [];
+
+            if (story.viewers) {
+                if (typeof story.viewers === "string") {
+                    viewers = JSON.parse(story.viewers);
+                } else {
+                    viewers = story.viewers;
+                }
+
+                // remove null viewers (when no views exist)
+                viewers = viewers.filter((v) => v.viewer_id !== null);
             }
 
-            // Parse viewers if stored as JSON string
-            const processedResults = results.map((story) => {
-                if (story.viewers && typeof story.viewers === "string") {
-                    story.viewers = JSON.parse(story.viewers);
-                }
-                return story;
-            });
+            return {
+                ...story,
+                viewers,
+            };
+        });
 
-            // Separate self stories and following stories
-            const selfStories = processedResults
-                .filter((story) => story.user_id === numericUserId)
-                .sort((b, a) => new Date(b.created_at) - new Date(a.created_at)); // Sort self stories
+        // ✅ Separate self & following stories
+        const selfStories = processedResults
+            .filter((story) => story.user_id === numericUserId)
+            .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
-            const followingStories = processedResults
-                .filter((story) => story.user_id !== numericUserId)
-                .sort((b, a) => new Date(b.created_at) - new Date(a.created_at)); // Sort following stories
+        const followingStories = processedResults
+            .filter((story) => story.user_id !== numericUserId)
+            .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
-            return res.status(200).json({
-                success: true,
-                selfStory: selfStories,
-                stories: followingStories,
-            });
+        return res.status(200).json({
+            success: true,
+            selfStory: selfStories,
+            stories: followingStories,
         });
     } catch (error) {
         console.error("Error fetching stories:", error);
