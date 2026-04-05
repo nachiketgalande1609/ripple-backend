@@ -1,4 +1,4 @@
-const db = require("../db");
+const { promisePool: db } = require("../db");
 const { getIo, getUserSockets } = require("../socket");
 
 const getTimeAgo = (createdAt) => {

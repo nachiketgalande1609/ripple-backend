@@ -1,7 +1,7 @@
 const express = require("express");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-const db = require("../db");
+const { promisePool: db } = require("../db");
 const router = express.Router();
 const { sendEmail } = require("../utils/mailer");
 const crypto = require("crypto");
@@ -9,9 +9,6 @@ const useragent = require("useragent");
 
 const { OAuth2Client } = require("google-auth-library");
 const client = new OAuth2Client("702353220748-2lmc03lb4tcfnuqds67h8bbupmb1aa0q.apps.googleusercontent.com");
-
-const util = require("util");
-const dbQuery = util.promisify(db.query).bind(db);
 
 router.post("/register", async (req, res) => {
     const { email, username, password } = req.body;
@@ -30,7 +27,7 @@ router.post("/register", async (req, res) => {
 
     try {
         // Check if the user already exists
-        const result = await dbQuery("SELECT * FROM users WHERE email = ? OR username = ?", [email, username]);
+        const [result] = await db.query("SELECT * FROM users WHERE email = ? OR username = ?", [email, username]);
 
         if (result.length > 0) {
             const existingUser = result[0];
@@ -91,7 +88,7 @@ router.post("/register", async (req, res) => {
                     If you didn’t create this account, you can safely ignore this email.
                 </p>
             </div>
-            `
+            `,
         );
 
         return res.status(201).json({
@@ -232,7 +229,7 @@ const sendResponse = (user, res) => {
             username: user.username,
         },
         process.env.JWT_SECRET || "secret123",
-        { expiresIn: "1h" } // Token expiration time
+        { expiresIn: "1h" }, // Token expiration time
     );
 
     // Return success response with user details and token
@@ -529,7 +526,7 @@ const logTrafficData = async (userData) => {
     try {
         // Check if the IP already exists in the database
         const checkQuery = `SELECT COUNT(*) AS count FROM website_traffic WHERE ip = ? AND platform = ?`;
-        const result = await dbQuery(checkQuery, [ip, platform]);
+        const [result] = await db.query(checkQuery, [ip, platform]);
 
         if (result[0].count === 0) {
             // If the IP doesn't exist, insert the traffic data

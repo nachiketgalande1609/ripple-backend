@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const db = require("../db");
+const { promisePool: db } = require("../db");
 const multer = require("multer");
 const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
 const upload = multer({ storage: multer.memoryStorage() });
@@ -23,10 +23,6 @@ const s3 = new S3Client({
         secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
     },
 });
-
-// Get all messages and users for the current user
-const util = require("util");
-const dbQuery = util.promisify(db.query).bind(db);
 
 router.get("/fetch-users", async (req, res) => {
     const currentUserId = req.headers["x-current-user-id"];
@@ -79,7 +75,7 @@ router.get("/fetch-users", async (req, res) => {
             ORDER BY u.username;
         `;
 
-        const usersResults = await dbQuery(query, [
+        const [usersResults] = await db.query(query, [
             currentUserId,
             currentUserId,
             currentUserId,
@@ -140,7 +136,7 @@ router.get("/fetch-messages", async (req, res) => {
 
     try {
         // Fetch the messages
-        const [messagesResults] = await db.promise().query(query, [currentUserId, selectedUserId, selectedUserId, currentUserId, limit, offset]);
+        const [messagesResults] = await db.query(query, [currentUserId, selectedUserId, selectedUserId, currentUserId, limit, offset]);
 
         // Extract all user IDs from reactions
         const allUserIds = new Set();
@@ -167,7 +163,7 @@ router.get("/fetch-messages", async (req, res) => {
         const userIds = Array.from(allUserIds);
         let userMap = {};
         if (userIds.length > 0) {
-            const [usersResults] = await db.promise().query(`SELECT id, username, profile_picture FROM users WHERE id IN (?);`, [userIds]);
+            const [usersResults] = await db.query(`SELECT id, username, profile_picture FROM users WHERE id IN (?);`, [userIds]);
 
             userMap = usersResults.reduce((acc, user) => {
                 acc[user.id] = user;
@@ -394,7 +390,7 @@ router.delete("/delete-message", async (req, res) => {
 
     try {
         // Check if message exists
-        const [results] = await db.promise().query("SELECT file_url FROM messages WHERE message_id = ?", [messageId]);
+        const [results] = await db.query("SELECT file_url FROM messages WHERE message_id = ?", [messageId]);
 
         if (results.length === 0) {
             return res.status(404).json({
@@ -407,7 +403,7 @@ router.delete("/delete-message", async (req, res) => {
         const fileUrl = results[0].file_url;
 
         // Delete message from database
-        await db.promise().query("DELETE FROM messages WHERE message_id = ?", [messageId]);
+        await db.query("DELETE FROM messages WHERE message_id = ?", [messageId]);
 
         // If there's a file attached, delete it from S3
         if (fileUrl) {

@@ -1,5 +1,5 @@
 const express = require("express");
-const db = require("../db");
+const { promisePool: db } = require("../db");
 const router = express.Router();
 
 router.get("/fetch-notifications", async (req, res) => {
@@ -28,10 +28,10 @@ router.get("/fetch-notifications", async (req, res) => {
     `;
 
     try {
-        const [notifications] = await db.promise().query(query, [currentUserId]);
+        const [notifications] = await db.query(query, [currentUserId]);
 
         // Update read status
-        await db.promise().query("UPDATE notifications SET is_read = TRUE WHERE user_id = ?", [currentUserId]);
+        await db.query("UPDATE notifications SET is_read = TRUE WHERE user_id = ?", [currentUserId]);
 
         res.status(200).json({
             success: true,
@@ -67,7 +67,7 @@ router.get("/fetch-notifications-count", async (req, res) => {
     `;
 
     try {
-        const [results] = await db.promise().query(query, [currentUserId, currentUserId]);
+        const [results] = await db.query(query, [currentUserId, currentUserId]);
 
         res.status(200).json({
             success: true,

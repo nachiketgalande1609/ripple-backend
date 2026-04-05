@@ -14,114 +14,100 @@ function initializeSocket(server, db) {
     });
 
     io.on("connection", (socket) => {
-        socket.on("registerUser", (userId) => {
+        socket.on("registerUser", async (userId) => {
             if (userSockets[userId] !== socket.id) {
                 userSockets[userId] = socket.id;
 
                 const onlineUsers = Object.keys(userSockets);
                 io.emit("onlineUsers", onlineUsers);
 
-                db.query(
-                    `UPDATE messages SET delivered = TRUE, delivered_timestamp = CONVERT_TZ(NOW(), 'UTC', 'Asia/Kolkata') WHERE receiver_id = ? AND delivered = FALSE`,
-                    [userId],
-                    (err) => {
-                        if (err) {
-                            console.error("Error marking messages as delivered:", err.message);
-                        } else {
-                            db.query(
-                                `SELECT * FROM messages WHERE receiver_id = ? AND delivered = TRUE AND is_read = FALSE`,
-                                [userId],
-                                (err, results) => {
-                                    if (err) {
-                                        console.error("Error retrieving unread messages:", err.message);
-                                        return;
-                                    }
+                try {
+                    await db.query(
+                        `UPDATE messages SET delivered = TRUE, delivered_timestamp = CONVERT_TZ(NOW(), 'UTC', 'Asia/Kolkata') WHERE receiver_id = ? AND delivered = FALSE`,
+                        [userId],
+                    );
 
-                                    results.forEach((message) => {
-                                        const senderSocketId = userSockets[message.sender_id];
-                                        if (senderSocketId) {
-                                            io.to(senderSocketId).emit("messageDelivered", {
-                                                messageId: message.message_id,
-                                                timestamp: new Date().toISOString(),
-                                            });
-                                        }
-                                    });
-                                },
-                            );
+                    const [unreadMessages] = await db.query(`SELECT * FROM messages WHERE receiver_id = ? AND delivered = TRUE AND is_read = FALSE`, [
+                        userId,
+                    ]);
+
+                    unreadMessages.forEach((message) => {
+                        const senderSocketId = userSockets[message.sender_id];
+                        if (senderSocketId) {
+                            io.to(senderSocketId).emit("messageDelivered", {
+                                messageId: message.message_id,
+                                timestamp: new Date().toISOString(),
+                            });
                         }
-                    },
-                );
+                    });
+                } catch (err) {
+                    console.error("Error in registerUser:", err.message);
+                }
             }
         });
 
-        // Handle sending messages
-        socket.on("sendMessage", (data) => {
-            console.log("Message received");
-
+        socket.on("sendMessage", async (data) => {
             const { senderId, receiverId, text, tempId, fileUrl, fileName, fileSize, replyTo, mediaWidth, mediaHeight, postId } = data;
 
             const receiverSocketId = userSockets[receiverId];
             const senderSocketId = userSockets[senderId];
-
             const delivered = !!receiverSocketId;
             const deliveredTimestamp = delivered ? new Date() : null;
 
-            db.query(
-                `
-                    INSERT INTO messages (sender_id, receiver_id, message_text, file_url, file_name, file_size, timestamp, delivered, delivered_timestamp, reply_to, media_width, media_height, post_id) 
-                    VALUES (?, ?, ?, ?, ?, ?, CONVERT_TZ(NOW(), 'UTC', 'Asia/Kolkata'), ?, ?, ?, ?, ?, ?);
-                `,
-                [senderId, receiverId, text, fileUrl, fileName, fileSize, delivered, deliveredTimestamp, replyTo, mediaWidth, mediaHeight, postId],
-                (err, results) => {
-                    if (err) {
-                        console.error("Error saving message:", err.message);
-                        return;
-                    }
+            try {
+                const [results] = await db.query(
+                    `INSERT INTO messages (sender_id, receiver_id, message_text, file_url, file_name, file_size, timestamp, delivered, delivered_timestamp, reply_to, media_width, media_height, post_id) 
+                     VALUES (?, ?, ?, ?, ?, ?, CONVERT_TZ(NOW(), 'UTC', 'Asia/Kolkata'), ?, ?, ?, ?, ?, ?);`,
+                    [
+                        senderId,
+                        receiverId,
+                        text,
+                        fileUrl,
+                        fileName,
+                        fileSize,
+                        delivered,
+                        deliveredTimestamp,
+                        replyTo,
+                        mediaWidth,
+                        mediaHeight,
+                        postId,
+                    ],
+                );
 
-                    const messageId = results.insertId;
+                const messageId = results.insertId;
+                io.to(senderSocketId).emit("messageSaved", { tempId, messageId, timestamp: new Date().toISOString() });
 
-                    io.to(senderSocketId).emit("messageSaved", { tempId, messageId, timestamp: new Date().toISOString() });
+                if (receiverSocketId) {
+                    const [[{ unreadCount }]] = await db.query(
+                        `SELECT COUNT(*) AS unreadCount FROM messages WHERE receiver_id = ? AND is_read = FALSE`,
+                        [receiverId],
+                    );
 
-                    if (receiverSocketId) {
-                        db.query(
-                            `SELECT COUNT(*) AS unreadCount FROM messages WHERE receiver_id = ? AND is_read = FALSE`,
-                            [receiverId],
-                            (err, results) => {
-                                if (err) {
-                                    console.error("Error counting unread messages:", err.message);
-                                    return;
-                                }
-
-                                const unreadCount = results[0]?.unreadCount || 0;
-
-                                io.to(receiverSocketId).emit("unreadMessagesCount", { unreadCount });
-
-                                io.to(receiverSocketId).emit("receiveMessage", {
-                                    messageId,
-                                    senderId,
-                                    message_text: text,
-                                    timestamp: new Date().toISOString(),
-                                    fileUrl,
-                                    fileName,
-                                    fileSize,
-                                    replyTo,
-                                    mediaWidth,
-                                    mediaHeight,
-                                });
-
-                                io.to(senderSocketId).emit("messageDelivered", {
-                                    messageId,
-                                    deliveredTimestamp: deliveredTimestamp ? deliveredTimestamp.toISOString() : null,
-                                    timestamp: new Date().toISOString(),
-                                });
-                            },
-                        );
-                    }
-                },
-            );
+                    io.to(receiverSocketId).emit("unreadMessagesCount", { unreadCount });
+                    io.to(receiverSocketId).emit("receiveMessage", {
+                        messageId,
+                        senderId,
+                        message_text: text,
+                        timestamp: new Date().toISOString(),
+                        fileUrl,
+                        fileName,
+                        fileSize,
+                        replyTo,
+                        mediaWidth,
+                        mediaHeight,
+                    });
+                    io.to(senderSocketId).emit("messageDelivered", {
+                        messageId,
+                        deliveredTimestamp: deliveredTimestamp?.toISOString() ?? null,
+                        timestamp: new Date().toISOString(),
+                    });
+                }
+            } catch (err) {
+                console.error("Error in sendMessage:", err.message);
+            }
         });
 
-        socket.on("messageRead", (data) => {
+        socket.on("messageRead", async (data) => {
             const { messageIds, senderId, receiverId } = data;
 
             if (!messageIds || messageIds.length === 0) {
@@ -131,41 +117,31 @@ function initializeSocket(server, db) {
 
             const senderSocketId = userSockets[senderId];
 
-            db.query(
-                `UPDATE messages SET is_read = TRUE, read_timestamp = CONVERT_TZ(NOW(), 'UTC', 'Asia/Kolkata') WHERE message_id IN (?)`,
-                [messageIds],
-                (err) => {
-                    if (err) {
-                        console.error("Error updating message status:", err.message);
-                        return;
-                    }
+            try {
+                await db.query(
+                    `UPDATE messages SET is_read = TRUE, read_timestamp = CONVERT_TZ(NOW(), 'UTC', 'Asia/Kolkata') WHERE message_id IN (?)`,
+                    [messageIds],
+                );
 
-                    // Fetch updated read timestamps from the database
-                    db.query(`SELECT message_id, read_timestamp FROM messages WHERE message_id IN (?)`, [messageIds], (err, results) => {
-                        if (err) {
-                            console.error("Error fetching read timestamps:", err.message);
-                            return;
-                        }
+                const [results] = await db.query(`SELECT message_id, read_timestamp FROM messages WHERE message_id IN (?)`, [messageIds]);
 
-                        if (senderSocketId) {
-                            io.to(senderSocketId).emit("messageRead", {
-                                receiverId,
-                                messageIds: results.map((msg) => ({
-                                    messageId: msg.message_id,
-                                    readTimestamp: msg.read_timestamp.toISOString(),
-                                })),
-                            });
-                        }
+                if (senderSocketId) {
+                    io.to(senderSocketId).emit("messageRead", {
+                        receiverId,
+                        messageIds: results.map((msg) => ({
+                            messageId: msg.message_id,
+                            readTimestamp: msg.read_timestamp.toISOString(),
+                        })),
                     });
-                },
-            );
+                }
+            } catch (err) {
+                console.error("Error in messageRead:", err.message);
+            }
         });
 
-        // Handle typing event (show typing indicator)
         socket.on("typing", (data) => {
             const { senderId, receiverId } = data;
             const receiverSocketId = userSockets[receiverId];
-
             if (receiverSocketId) {
                 io.to(receiverSocketId).emit("typing", { senderId, receiverId });
             }
@@ -174,13 +150,12 @@ function initializeSocket(server, db) {
         socket.on("stopTyping", (data) => {
             const { senderId, receiverId } = data;
             const receiverSocketId = userSockets[receiverId];
-
             if (receiverSocketId) {
                 io.to(receiverSocketId).emit("stopTyping", { senderId, receiverId });
             }
         });
 
-        socket.on("send-reaction", (data) => {
+        socket.on("send-reaction", async (data) => {
             const { messageId, senderUserId, reaction } = data;
 
             if (!messageId || !senderUserId) {
@@ -188,65 +163,48 @@ function initializeSocket(server, db) {
                 return;
             }
 
-            let query;
-            let queryParams;
+            try {
+                if (reaction === null) {
+                    await db.query(`UPDATE messages SET reactions = JSON_REMOVE(reactions, CONCAT('$."', ? , '"')) WHERE message_id = ?`, [
+                        senderUserId,
+                        messageId,
+                    ]);
+                } else {
+                    await db.query(
+                        `UPDATE messages SET reactions = JSON_SET(COALESCE(reactions, '{}'), CONCAT('$."', ? , '"'), ?) WHERE message_id = ?`,
+                        [senderUserId, reaction, messageId],
+                    );
+                }
 
-            if (reaction === null) {
-                query = `UPDATE messages 
-                 SET reactions = JSON_REMOVE(reactions, CONCAT('$."', ? , '"')) 
-                 WHERE message_id = ?`;
-                queryParams = [senderUserId, messageId];
-            } else {
-                query = `UPDATE messages 
-                 SET reactions = JSON_SET(COALESCE(reactions, '{}'), CONCAT('$."', ? , '"'), ?) 
-                 WHERE message_id = ?`;
-                queryParams = [senderUserId, reaction, messageId];
-            }
+                const [[user]] = await db.query(`SELECT username, profile_picture FROM users WHERE id = ?`, [senderUserId]);
 
-            db.query(query, queryParams, (err) => {
-                if (err) {
-                    console.error("Error updating reactions:", err.message);
+                if (!user) {
+                    console.error("User not found for reaction.");
                     return;
                 }
 
-                // Fetch sender's user data (username, profile_picture)
-                db.query(`SELECT username, profile_picture FROM users WHERE id = ?`, [senderUserId], (err, userResults) => {
-                    if (err || userResults.length === 0) {
-                        console.error("Error fetching user data:", err?.message || "User not found");
-                        return;
+                const [[message]] = await db.query(`SELECT receiver_id, sender_id FROM messages WHERE message_id = ?`, [messageId]);
+
+                if (message) {
+                    const { receiver_id, sender_id } = message;
+                    const targetUserId = senderUserId === sender_id ? receiver_id : sender_id;
+                    const receiverSocketId = userSockets[targetUserId];
+
+                    if (receiverSocketId) {
+                        io.to(receiverSocketId).emit("reaction-received", {
+                            messageId,
+                            reaction: {
+                                user_id: senderUserId.toString(),
+                                reaction,
+                                username: user.username,
+                                profile_picture: user.profile_picture,
+                            },
+                        });
                     }
-
-                    const { username, profile_picture } = userResults[0];
-
-                    // Fetch message to determine receiver
-                    db.query(`SELECT receiver_id, sender_id FROM messages WHERE message_id = ?`, [messageId], (err, messageResults) => {
-                        if (err) {
-                            console.error("Error fetching message data:", err.message);
-                            return;
-                        }
-
-                        if (messageResults.length > 0) {
-                            const { receiver_id, sender_id } = messageResults[0];
-                            const targetUserId = senderUserId === sender_id ? receiver_id : sender_id;
-                            const receiverSocketId = userSockets[targetUserId];
-
-                            if (receiverSocketId) {
-                                const reactionObject = {
-                                    user_id: senderUserId.toString(),
-                                    reaction,
-                                    username,
-                                    profile_picture,
-                                };
-
-                                io.to(receiverSocketId).emit("reaction-received", {
-                                    messageId,
-                                    reaction: reactionObject,
-                                });
-                            }
-                        }
-                    });
-                });
-            });
+                }
+            } catch (err) {
+                console.error("Error in send-reaction:", err.message);
+            }
         });
 
         socket.on("viewStory", async (data) => {
@@ -255,67 +213,36 @@ function initializeSocket(server, db) {
             if (!user_id || !story_id) return;
 
             try {
-                // Check if the user is viewing their own story
-                const checkStoryOwnerQuery = `
-            SELECT user_id FROM stories 
-            WHERE id = ?
-        `;
-                db.query(checkStoryOwnerQuery, [story_id], (err, result) => {
-                    if (err) {
-                        console.error("Error checking story owner:", err);
-                        return;
-                    }
+                const [[storyOwner]] = await db.query(`SELECT user_id FROM stories WHERE id = ?`, [story_id]);
 
-                    // If the user is the owner of the story, don't register the view
-                    if (result.length > 0 && result[0].user_id === user_id) {
-                        console.log(`User ${user_id} is viewing their own story ${story_id}. No view will be registered.`);
-                        return;
-                    }
+                if (!storyOwner) return;
 
-                    // Check if the user has already viewed the story
-                    const checkQuery = `
-                SELECT * FROM story_views 
-                WHERE user_id = ? AND story_id = ?
-            `;
-                    db.query(checkQuery, [user_id, story_id], (err, result) => {
-                        if (err) {
-                            console.error("Error checking for existing view:", err);
-                            return;
-                        }
+                if (storyOwner.user_id === user_id) {
+                    console.log(`User ${user_id} is viewing their own story ${story_id}. No view registered.`);
+                    return;
+                }
 
-                        if (result.length > 0) {
-                            console.log(`User ${user_id} has already viewed story ${story_id}`);
-                            return;
-                        }
+                const [existing] = await db.query(`SELECT * FROM story_views WHERE user_id = ? AND story_id = ?`, [user_id, story_id]);
 
-                        // Register the view if not already registered
-                        const query = `
-                    INSERT INTO story_views (user_id, story_id)
-                    VALUES (?, ?)
-                `;
-                        db.query(query, [user_id, story_id], (err, result) => {
-                            if (err) {
-                                console.error("Error inserting view:", err);
-                                return;
-                            }
+                if (existing.length > 0) {
+                    console.log(`User ${user_id} has already viewed story ${story_id}`);
+                    return;
+                }
 
-                            socket.emit("storyViewSuccess", { message: "Story view recorded successfully!" });
+                await db.query(`INSERT INTO story_views (user_id, story_id) VALUES (?, ?)`, [user_id, story_id]);
 
-                            socket.broadcast.emit("newStoryView", { user_id, story_id });
-                        });
-                    });
-                });
-            } catch (error) {
-                console.error("Error tracking story view:", error);
+                socket.emit("storyViewSuccess", { message: "Story view recorded successfully!" });
+                socket.broadcast.emit("newStoryView", { user_id, story_id });
+            } catch (err) {
+                console.error("Error tracking story view:", err.message);
             }
         });
 
-        // In your backend socket code
         socket.on("callUser", (data) => {
-            const { from, to, signal, callerUsername, callerProfilePicture } = data; // Add callerProfilePicture
+            const { from, to, signal, callerUsername, callerProfilePicture } = data;
             const receiverSocketId = userSockets[to];
             if (receiverSocketId) {
-                io.to(receiverSocketId).emit("callReceived", { signal, from, callerUsername, callerProfilePicture }); // Pass callerProfilePicture
+                io.to(receiverSocketId).emit("callReceived", { signal, from, callerUsername, callerProfilePicture });
             }
         });
 
@@ -335,7 +262,6 @@ function initializeSocket(server, db) {
             }
         });
 
-        // Add this to your backend socket code
         socket.on("endCall", (data) => {
             const { to } = data;
             const receiverSocketId = userSockets[to];
@@ -344,16 +270,12 @@ function initializeSocket(server, db) {
             }
         });
 
-        // Handle disconnect event and clean up the mapping
-        socket.on("disconnect", (reason) => {
-            // console.log(`User ${socket.id} disconnected due to ${reason}`);
+        socket.on("disconnect", () => {
             for (let userId in userSockets) {
                 if (userSockets[userId] === socket.id) {
-                    const onlineUsers = Object.keys(userSockets);
-                    socket.emit("onlineUsers", onlineUsers);
-
                     delete userSockets[userId];
-                    // console.log(`User ${userId} removed from userSockets`);
+                    const onlineUsers = Object.keys(userSockets);
+                    io.emit("onlineUsers", onlineUsers); // broadcast to everyone, not just disconnected socket
                     break;
                 }
             }
@@ -361,15 +283,11 @@ function initializeSocket(server, db) {
     });
 }
 
-// Function to get io instance after initialization
 function getIo() {
-    if (!io) {
-        throw new Error("Socket.io has not been initialized!");
-    }
+    if (!io) throw new Error("Socket.io has not been initialized!");
     return io;
 }
 
-// Function to get the latest userSockets reference
 function getUserSockets() {
     return userSockets;
 }

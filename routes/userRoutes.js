@@ -1,5 +1,5 @@
 const express = require("express");
-const db = require("../db");
+const { promisePool: db } = require("../db");
 const router = express.Router();
 const sharp = require("sharp");
 
@@ -23,7 +23,7 @@ router.get("/fetch-profile-details", async (req, res) => {
 
         // Fetch user profile
         const userQuery = "SELECT id, username, email, bio, profile_picture, is_private FROM users WHERE id = ?";
-        const [userResults] = await db.promise().query(userQuery, [userId]);
+        const [userResults] = await db.query(userQuery, [userId]);
 
         if (userResults.length === 0) {
             return res.status(404).json({ success: false, error: "User not found", data: null });
@@ -33,22 +33,22 @@ router.get("/fetch-profile-details", async (req, res) => {
 
         // Execute all queries concurrently
         const [[postResults], [followersResults], [followingResults], [followRequestResults], [followResults]] = await Promise.all([
-            db.promise().query("SELECT COUNT(id) AS posts_count FROM posts WHERE user_id = ?", [userId]),
-            db.promise().query("SELECT COUNT(*) AS followers_count FROM followers WHERE following_id = ?", [userId]),
-            db.promise().query("SELECT COUNT(*) AS following_count FROM followers WHERE follower_id = ?", [userId]),
-            db.promise().query(
+            db.query("SELECT COUNT(id) AS posts_count FROM posts WHERE user_id = ?", [userId]),
+            db.query("SELECT COUNT(*) AS followers_count FROM followers WHERE following_id = ?", [userId]),
+            db.query("SELECT COUNT(*) AS following_count FROM followers WHERE follower_id = ?", [userId]),
+            db.query(
                 `
                 SELECT status 
                 FROM follow_requests 
                 WHERE follower_id = ? AND following_id = ? 
                 ORDER BY created_at DESC LIMIT 1`,
-                [currentUserId, userId]
+                [currentUserId, userId],
             ),
-            db.promise().query(
+            db.query(
                 `
                 SELECT 1 FROM followers 
                 WHERE follower_id = ? AND following_id = ? LIMIT 1`,
-                [currentUserId, userId]
+                [currentUserId, userId],
             ),
         ]);
 
@@ -197,7 +197,7 @@ router.put("/profile/update-profile-details", async (req, res) => {
         values.push(currentUserId);
 
         // Execute the query with the provided parameters
-        const [result] = await db.promise().query(query, values);
+        const [result] = await db.query(query, values);
 
         if (result.affectedRows === 0) {
             return res.status(404).json({

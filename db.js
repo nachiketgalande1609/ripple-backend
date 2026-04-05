@@ -1,3 +1,4 @@
+// db.js
 const mysql = require("mysql2");
 const dotenv = require("dotenv");
 const fs = require("fs");
@@ -5,7 +6,7 @@ const path = require("path");
 
 dotenv.config();
 
-const db = mysql.createPool({
+const pool = mysql.createPool({
     host: process.env.DB_HOST,
     user: process.env.DB_USER,
     password: process.env.DB_PASSWORD,
@@ -14,9 +15,13 @@ const db = mysql.createPool({
     waitForConnections: true,
     connectionLimit: 10,
     queueLimit: 0,
+    enableKeepAlive: true,
+    keepAliveInitialDelay: 10000,
     ssl: {
-        ca: fs.readFileSync(path.join(__dirname, "ca.pem")), // <-- Aiven CA certificate
+        ca: fs.readFileSync(path.join(__dirname, "ca.pem")),
     },
 });
 
-module.exports = db;
+const promisePool = pool.promise();
+
+module.exports = { pool, promisePool };

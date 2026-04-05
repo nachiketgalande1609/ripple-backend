@@ -1,5 +1,4 @@
 const express = require("express");
-const db = require("../db");
 const router = express.Router();
 const { getTimeAgo } = require("../utils/utils");
 const { createNotification } = require("../utils/utils");
@@ -7,8 +6,8 @@ const multer = require("multer");
 const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
 const { emitUnreadNotificationCount, emitNotifications } = require("../utils/utils");
 const sharp = require("sharp");
-const util = require("util");
-const dbQuery = util.promisify(db.query).bind(db);
+
+const { promisePool: db } = require("../db");
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -129,7 +128,7 @@ router.post("/submit-post-comment", async (req, res) => {
     try {
         const insertResult = await dbQuery(
             "INSERT INTO comments (user_id, post_id, content, created_at) VALUES (?, ?, ?, CONVERT_TZ(NOW(), 'UTC', 'Asia/Kolkata'))",
-            [currentUserId, postId, comment]
+            [currentUserId, postId, comment],
         );
 
         const commentId = insertResult.insertId;
@@ -539,7 +538,7 @@ router.post("/create-post", upload.single("image"), async (req, res) => {
             VALUES (?, ?, ?, ?, ?, ?)
         `;
 
-        const result = await dbQuery(insertQuery, [content, fileUrl, location, user_id, mediaWidth, mediaHeight]);
+        const [result] = await db.query(insertQuery, [content, fileUrl, location, user_id, mediaWidth, mediaHeight]);
 
         return res.status(201).json({
             success: true,
@@ -585,7 +584,7 @@ router.post("/update-post", async (req, res) => {
     values.push(postId);
 
     try {
-        const result = await dbQuery(query, values);
+        const [result] = await db.query(query, values);
 
         if (result.affectedRows === 0) {
             return res.status(404).json({
@@ -632,7 +631,7 @@ router.delete("/delete-post", async (req, res) => {
     const checkOwnershipQuery = "SELECT * FROM posts WHERE id = ? AND user_id = ?";
 
     try {
-        const result = await dbQuery(checkOwnershipQuery, [postId, currentUserId]);
+        const [result] = await db.query(checkOwnershipQuery, [postId, currentUserId]);
 
         if (result.length === 0) {
             return res.status(403).json({
@@ -680,7 +679,7 @@ router.get("/fetch-saved-posts", async (req, res) => {
             WHERE sp.user_id = ?
             ORDER BY p.created_at DESC;
         `;
-        const result = await dbQuery(savedPostsQuery, [currentUserId]);
+        const [result] = await db.query(savedPostsQuery, [currentUserId]);
 
         // Fetch like counts for each post
         const postIds = result.map((post) => post.id);
@@ -891,7 +890,7 @@ async function fetchPosts(userId, res) {
                 p.created_at DESC;
         `;
 
-        const result = await dbQuery(postsQuery, [userId]);
+        const [result] = await db.query(postsQuery, [userId]);
 
         if (result.length === 0) {
             return res.status(200).json({
@@ -934,7 +933,7 @@ async function fetchPostDetails(userId, postId, currentUserId, res) {
                 p.id = ? AND p.user_id = ?;
         `;
 
-        const result = await dbQuery(postQuery, [postId, userId]);
+        const [result] = await db.query(postQuery, [postId, userId]);
 
         if (result.length === 0) {
             return res.status(404).json({

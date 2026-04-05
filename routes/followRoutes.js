@@ -1,5 +1,5 @@
 const express = require("express");
-const db = require("../db");
+const { promisePool: db } = require("../db");
 const router = express.Router();
 const { emitUnreadNotificationCount, emitNotifications } = require("../utils/utils");
 
@@ -17,10 +17,10 @@ router.post("/", async (req, res) => {
 
     try {
         // Check for existing follow request
-        const [existing] = await db.promise().query(
+        const [existing] = await db.query(
             `SELECT * FROM follow_requests 
              WHERE follower_id = ? AND following_id = ? AND status = 'pending'`,
-            [followerId, followingId]
+            [followerId, followingId],
         );
 
         if (existing.length > 0) {
@@ -32,18 +32,18 @@ router.post("/", async (req, res) => {
         }
 
         // Create new follow request
-        const [result] = await db.promise().query(
+        const [result] = await db.query(
             `INSERT INTO follow_requests (follower_id, following_id) 
              VALUES (?, ?)`,
-            [followerId, followingId]
+            [followerId, followingId],
         );
 
         // Create notification
-        await db.promise().query(
+        await db.query(
             `INSERT INTO notifications 
              (user_id, sender_id, type, message, follow_request_id, created_at)
              VALUES (?, ?, 'follow_request', ?, ?, CONVERT_TZ(NOW(), 'UTC', 'Asia/Kolkata'))`,
-            [followingId, followerId, "has sent you a follow request.", result.insertId]
+            [followingId, followerId, "has sent you a follow request.", result.insertId],
         );
 
         emitUnreadNotificationCount(followingId);
@@ -75,10 +75,10 @@ router.delete("/unfollow", async (req, res) => {
 
     try {
         // Delete the follow relationship from the followers table
-        const [result] = await db.promise().query(
+        const [result] = await db.query(
             `DELETE FROM followers 
              WHERE follower_id = ? AND following_id = ?`,
-            [followerId, followingId]
+            [followerId, followingId],
         );
 
         if (result.affectedRows === 0) {
@@ -117,7 +117,7 @@ router.post("/response", async (req, res) => {
 
     try {
         // Check if follow request exists
-        const [request] = await db.promise().query(`SELECT * FROM follow_requests WHERE id = ?`, [requestId]);
+        const [request] = await db.query(`SELECT * FROM follow_requests WHERE id = ?`, [requestId]);
 
         if (request.length === 0) {
             return res.status(404).json({
@@ -130,17 +130,17 @@ router.post("/response", async (req, res) => {
         const { follower_id, following_id } = request[0];
 
         // Update follow request status
-        await db.promise().query(`UPDATE follow_requests SET status = ? WHERE id = ?`, [status, requestId]);
+        await db.query(`UPDATE follow_requests SET status = ? WHERE id = ?`, [status, requestId]);
 
         // If accepted, create a follower relationship
         if (status === "accepted") {
-            await db.promise().query(`INSERT INTO followers (follower_id, following_id) VALUES (?, ?)`, [follower_id, following_id]);
+            await db.query(`INSERT INTO followers (follower_id, following_id) VALUES (?, ?)`, [follower_id, following_id]);
 
             // Create acceptance notification
-            await db.promise().query(
+            await db.query(
                 `INSERT INTO notifications (user_id, sender_id, type, message, created_at)
                  VALUES (?, ?, 'follow_accepted', ?, CONVERT_TZ(NOW(), 'UTC', 'Asia/Kolkata'))`,
-                [follower_id, following_id, "accepted your follow request."]
+                [follower_id, following_id, "accepted your follow request."],
             );
 
             emitUnreadNotificationCount(follower_id);
@@ -171,7 +171,7 @@ router.get("/fetch-following-list", async (req, res) => {
             WHERE f.follower_id = ?
         `;
 
-        const [results] = await db.promise().query(query, [currentUserId]);
+        const [results] = await db.query(query, [currentUserId]);
 
         res.status(200).json({
             success: true,
@@ -200,10 +200,10 @@ router.delete("/cancel-request", async (req, res) => {
 
     try {
         // Delete the pending follow request
-        const [result] = await db.promise().query(
+        const [result] = await db.query(
             `DELETE FROM follow_requests 
              WHERE follower_id = ? AND following_id = ? AND status = 'pending'`,
-            [followerId, followingId]
+            [followerId, followingId],
         );
 
         if (result.affectedRows === 0) {
@@ -215,10 +215,10 @@ router.delete("/cancel-request", async (req, res) => {
         }
 
         // Optionally delete the related notification
-        await db.promise().query(
+        await db.query(
             `DELETE FROM notifications 
              WHERE sender_id = ? AND user_id = ? AND type = 'follow_request'`,
-            [followerId, followingId]
+            [followerId, followingId],
         );
 
         res.status(200).json({
