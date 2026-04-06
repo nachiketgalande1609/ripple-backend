@@ -9,250 +9,220 @@ const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
 const upload = multer({ storage: multer.memoryStorage() });
 
 const s3 = new S3Client({
-  region: process.env.AWS_REGION,
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-  },
+    region: process.env.AWS_REGION,
+    credentials: {
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+    },
 });
 
 router.get("/fetch-profile-details", async (req, res) => {
-  try {
-    const currentUserId = req.headers["x-current-user-id"];
-    const { userId } = req.query;
+    try {
+        const currentUserId = req.headers["x-current-user-id"];
+        const { userId } = req.query;
 
-    // Fetch user profile
-    const userQuery =
-      "SELECT id, username, email, bio, profile_picture, is_private FROM users WHERE id = ?";
-    const [userResults] = await db.query(userQuery, [userId]);
+        // Fetch user profile
+        const userQuery = "SELECT id, username, email, bio, profile_picture, is_private FROM users WHERE id = ?";
+        const [userResults] = await db.query(userQuery, [userId]);
 
-    if (userResults.length === 0) {
-      return res
-        .status(404)
-        .json({ success: false, error: "User not found", data: null });
-    }
+        if (userResults.length === 0) {
+            return res.status(404).json({ success: false, error: "User not found", data: null });
+        }
 
-    const user = userResults[0];
+        const user = userResults[0];
 
-    // Execute all queries concurrently
-    const [
-      [postResults],
-      [followersResults],
-      [followingResults],
-      [followRequestResults],
-      [followResults],
-    ] = await Promise.all([
-      db.query("SELECT COUNT(id) AS posts_count FROM posts WHERE user_id = ?", [
-        userId,
-      ]),
-      db.query(
-        "SELECT COUNT(*) AS followers_count FROM followers WHERE following_id = ?",
-        [userId],
-      ),
-      db.query(
-        "SELECT COUNT(*) AS following_count FROM followers WHERE follower_id = ?",
-        [userId],
-      ),
-      db.query(
-        `
+        // Execute all queries concurrently
+        const [[postResults], [followersResults], [followingResults], [followRequestResults], [followResults]] = await Promise.all([
+            db.query("SELECT COUNT(id) AS posts_count FROM posts WHERE user_id = ?", [userId]),
+            db.query("SELECT COUNT(*) AS followers_count FROM followers WHERE following_id = ?", [userId]),
+            db.query("SELECT COUNT(*) AS following_count FROM followers WHERE follower_id = ?", [userId]),
+            db.query(
+                `
                 SELECT status 
                 FROM follow_requests 
                 WHERE follower_id = ? AND following_id = ? 
                 ORDER BY created_at DESC LIMIT 1`,
-        [currentUserId, userId],
-      ),
-      db.query(
-        `
+                [currentUserId, userId],
+            ),
+            db.query(
+                `
                 SELECT 1 FROM followers 
                 WHERE follower_id = ? AND following_id = ? LIMIT 1`,
-        [currentUserId, userId],
-      ),
-    ]);
+                [currentUserId, userId],
+            ),
+        ]);
 
-    // Extract values
-    const postsCount = postResults[0]?.posts_count || 0;
-    const followersCount = followersResults[0]?.followers_count || 0;
-    const followingCount = followingResults[0]?.following_count || 0;
+        // Extract values
+        const postsCount = postResults[0]?.posts_count || 0;
+        const followersCount = followersResults[0]?.followers_count || 0;
+        const followingCount = followingResults[0]?.following_count || 0;
 
-    // Determine follow status
-    let followStatus = "none";
-    if (followRequestResults.length > 0) {
-      followStatus = followRequestResults[0].status;
+        // Determine follow status
+        let followStatus = "none";
+        if (followRequestResults.length > 0) {
+            followStatus = followRequestResults[0].status;
+        }
+
+        const isFollowing = followResults.length > 0;
+
+        res.status(200).json({
+            success: true,
+            data: {
+                ...user,
+                posts_count: postsCount,
+                followers_count: followersCount,
+                following_count: followingCount,
+                is_following: isFollowing,
+                is_request_active: followStatus === "pending",
+                follow_status: followStatus,
+            },
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
     }
-
-    const isFollowing = followResults.length > 0;
-
-    res.status(200).json({
-      success: true,
-      data: {
-        ...user,
-        posts_count: postsCount,
-        followers_count: followersCount,
-        following_count: followingCount,
-        is_following: isFollowing,
-        is_request_active: followStatus === "pending",
-        follow_status: followStatus,
-      },
-    });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
 });
 
-router.post(
-  "/update-profile-picture",
-  upload.single("profile_pic"),
-  async (req, res) => {
+router.post("/update-profile-picture", upload.single("profile_pic"), async (req, res) => {
     try {
-      const { user_id } = req.body;
-      const file = req.file;
+        const { user_id } = req.body;
+        const file = req.file;
 
-      // Validate required fields
-      if (!user_id || !file) {
-        return res.status(400).json({
-          success: false,
-          error: "User ID and profile picture are required.",
-          data: null,
+        // Validate required fields
+        if (!user_id || !file) {
+            return res.status(400).json({
+                success: false,
+                error: "User ID and profile picture are required.",
+                data: null,
+            });
+        }
+
+        // Resize image
+        const resizedImageBuffer = await sharp(file.buffer).resize({ width: 150, height: 150, fit: "cover" }).toFormat("jpeg").toBuffer();
+
+        // Upload to S3
+        const uploadParams = {
+            Bucket: process.env.AWS_S3_BUCKET_NAME,
+            Key: `profile_pictures/${Date.now()}_${file.originalname}`,
+            Body: resizedImageBuffer,
+            ContentType: "image/jpeg",
+            ACL: "public-read",
+        };
+
+        const command = new PutObjectCommand(uploadParams);
+        await s3.send(command);
+
+        const fileUrl = `https://${uploadParams.Bucket}.s3.${process.env.AWS_REGION}.amazonaws.com/${uploadParams.Key}`;
+
+        // ✅ DB using promise
+        const query = "UPDATE users SET profile_picture = ? WHERE id = ?";
+        await db.query(query, [fileUrl, user_id]);
+
+        return res.status(200).json({
+            success: true,
+            message: "Profile picture updated successfully.",
+            fileUrl,
         });
-      }
-
-      // Resize image
-      const resizedImageBuffer = await sharp(file.buffer)
-        .resize({ width: 150, height: 150, fit: "cover" })
-        .toFormat("jpeg")
-        .toBuffer();
-
-      // Upload to S3
-      const uploadParams = {
-        Bucket: process.env.AWS_S3_BUCKET_NAME,
-        Key: `profile_pictures/${Date.now()}_${file.originalname}`,
-        Body: resizedImageBuffer,
-        ContentType: "image/jpeg",
-        ACL: "public-read",
-      };
-
-      const command = new PutObjectCommand(uploadParams);
-      await s3.send(command);
-
-      const fileUrl = `https://${uploadParams.Bucket}.s3.${process.env.AWS_REGION}.amazonaws.com/${uploadParams.Key}`;
-
-      // ✅ DB using promise
-      const query = "UPDATE users SET profile_picture = ? WHERE id = ?";
-      await db.query(query, [fileUrl, user_id]);
-
-      return res.status(200).json({
-        success: true,
-        message: "Profile picture updated successfully.",
-        fileUrl,
-      });
     } catch (error) {
-      console.error("Error processing image:", error.message);
+        console.error("Error processing image:", error.message);
 
-      return res.status(500).json({
-        success: false,
-        error: error.message,
-        data: null,
-      });
+        return res.status(500).json({
+            success: false,
+            error: error.message,
+            data: null,
+        });
     }
-  },
-);
+});
 
 router.put("/profile/update-profile-details", async (req, res) => {
-  const currentUserId = req.headers["x-current-user-id"];
-  const { updatedProfile } = req.body;
+    const currentUserId = req.headers["x-current-user-id"];
+    const { updatedProfile } = req.body;
 
-  // Validate required fields
-  if (!currentUserId || !updatedProfile) {
-    return res.status(400).json({
-      success: false,
-      error: "Nothing to update",
-      data: null,
-    });
-  }
-
-  const { username, email, bio, profile_picture_url } = updatedProfile;
-
-  const usernameRegex = /^[a-zA-Z0-9_]+$/;
-  if (username && !usernameRegex.test(username)) {
-    return res.status(400).json({
-      success: false,
-      error:
-        "Invalid 'username'. It can only contain letters, numbers, and underscores.",
-      data: null,
-    });
-  }
-
-  try {
-    // Prepare the update query with dynamic fields
-    let query = "UPDATE users SET ";
-    const values = [];
-
-    // Only add the fields that were provided in the request
-    if (username) {
-      query += "username = ?, ";
-      values.push(username);
-    }
-    if (email) {
-      query += "email = ?, ";
-      values.push(email);
-    }
-    if (bio) {
-      query += "bio = ?, ";
-      values.push(bio);
-    }
-    if (profile_picture_url) {
-      query += "profile_picture = ?, ";
-      values.push(profile_picture_url);
+    // Validate required fields
+    if (!currentUserId || !updatedProfile) {
+        return res.status(400).json({
+            success: false,
+            error: "Nothing to update",
+            data: null,
+        });
     }
 
-    // Remove the trailing comma and space
-    query = query.slice(0, -2);
+    const { username, email, bio, profile_picture_url } = updatedProfile;
 
-    query += " WHERE id = ?";
-    values.push(currentUserId);
-
-    // Execute the query with the provided parameters
-    const [result] = await db.query(query, values);
-
-    if (result.affectedRows === 0) {
-      return res.status(404).json({
-        success: false,
-        error: "User not found or no changes made.",
-        data: null,
-      });
+    const usernameRegex = /^[a-zA-Z0-9_]+$/;
+    if (username && !usernameRegex.test(username)) {
+        return res.status(400).json({
+            success: false,
+            error: "Invalid 'username'. It can only contain letters, numbers, and underscores.",
+            data: null,
+        });
     }
 
-    // Fetch the updated user data
-    const [updatedUserResults] = await db
-      .promise()
-      .query(
-        "SELECT id, username, email, bio, profile_picture FROM users WHERE id = ?",
-        [currentUserId],
-      );
+    try {
+        // Prepare the update query with dynamic fields
+        let query = "UPDATE users SET ";
+        const values = [];
 
-    const updatedUser = updatedUserResults[0];
+        // Only add the fields that were provided in the request
+        if (username) {
+            query += "username = ?, ";
+            values.push(username);
+        }
+        if (email) {
+            query += "email = ?, ";
+            values.push(email);
+        }
+        if (bio) {
+            query += "bio = ?, ";
+            values.push(bio);
+        }
+        if (profile_picture_url) {
+            query += "profile_picture = ?, ";
+            values.push(profile_picture_url);
+        }
 
-    res.status(200).json({
-      success: true,
-      message: "Profile updated successfully.",
-      data: updatedUser,
-    });
-  } catch (error) {
-    console.error("Error updating profile:", error.message);
-    if (error.code === "ER_DUP_ENTRY") {
-      return res.status(400).json({
-        success: false,
-        error: "Username already exists",
-        data: null,
-      });
+        // Remove the trailing comma and space
+        query = query.slice(0, -2);
+
+        query += " WHERE id = ?";
+        values.push(currentUserId);
+
+        // Execute the query with the provided parameters
+        const [result] = await db.query(query, values);
+
+        if (result.affectedRows === 0) {
+            return res.status(404).json({
+                success: false,
+                error: "User not found or no changes made.",
+                data: null,
+            });
+        }
+
+        // Fetch the updated user data
+        const [updatedUserResults] = await db.query("SELECT id, username, email, bio, profile_picture FROM users WHERE id = ?", [currentUserId]);
+
+        const updatedUser = updatedUserResults[0];
+
+        res.status(200).json({
+            success: true,
+            message: "Profile updated successfully.",
+            data: updatedUser,
+        });
+    } catch (error) {
+        console.error("Error updating profile:", error.message);
+        if (error.code === "ER_DUP_ENTRY") {
+            return res.status(400).json({
+                success: false,
+                error: "Username already exists",
+                data: null,
+            });
+        }
+
+        return res.status(500).json({
+            success: false,
+            error: "Something went wrong. Please try again.",
+            data: null,
+        });
     }
-
-    return res.status(500).json({
-      success: false,
-      error: "Something went wrong. Please try again.",
-      data: null,
-    });
-  }
 });
 
 module.exports = router;
