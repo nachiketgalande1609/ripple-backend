@@ -103,6 +103,48 @@ router.delete("/unfollow", async (req, res) => {
     }
 });
 
+router.delete("/remove-follower", async (req, res) => {
+    const { followerId, followingId } = req.body;
+    // followerId = the person you want to remove
+    // followingId = you (the current user)
+
+    if (!followerId || !followingId) {
+        return res.status(400).json({
+            success: false,
+            error: "Missing required fields",
+            data: null,
+        });
+    }
+
+    try {
+        const [result] = await db.query(
+            `DELETE FROM followers 
+             WHERE follower_id = ? AND following_id = ?`,
+            [followerId, followingId]
+        );
+
+        if (result.affectedRows === 0) {
+            return res.status(404).json({
+                success: false,
+                error: "Follow relationship not found",
+                data: null,
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            error: null,
+            data: { message: "Follower removed successfully" },
+        });
+    } catch (err) {
+        res.status(500).json({
+            success: false,
+            error: err.message,
+            data: null,
+        });
+    }
+});
+
 // Respond to follow request
 router.post("/response", async (req, res) => {
     const { requestId, status } = req.body;
@@ -232,6 +274,110 @@ router.delete("/cancel-request", async (req, res) => {
             error: err.message,
             data: null,
         });
+    }
+});
+
+router.get("/:userId/followers", async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const currentUserId = req.headers["x-current-user-id"];
+ 
+        // Get the target user's username for display
+        const [userRows] = await db.query(
+            "SELECT username FROM users WHERE id = ?",
+            [userId]
+        );
+ 
+        if (userRows.length === 0) {
+            return res.status(404).json({ success: false, error: "User not found" });
+        }
+ 
+        // Fetch followers with their follow-back status relative to currentUserId
+        const [followers] = await db.query(
+            `SELECT
+                u.id,
+                u.username,
+                u.profile_picture,
+                u.is_private,
+                CASE WHEN f2.follower_id IS NOT NULL THEN 1 ELSE 0 END AS is_following,
+                COALESCE(fr.status, 'none') AS follow_status,
+                CASE WHEN fr.status = 'pending' THEN 1 ELSE 0 END AS is_request_active
+             FROM followers f
+             JOIN users u ON f.follower_id = u.id
+             LEFT JOIN followers f2
+                ON f2.follower_id = ? AND f2.following_id = u.id
+             LEFT JOIN follow_requests fr
+                ON fr.follower_id = ? AND fr.following_id = u.id AND fr.status = 'pending'
+             WHERE f.following_id = ?
+             ORDER BY u.username ASC`,
+            [currentUserId, currentUserId, userId]
+        );
+ 
+        res.status(200).json({
+            success: true,
+            data: {
+                username: userRows[0].username,
+                followers: followers.map((row) => ({
+                    ...row,
+                    is_following: !!row.is_following,
+                    is_request_active: !!row.is_request_active,
+                })),
+            },
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+router.get("/:userId/following", async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const currentUserId = req.headers["x-current-user-id"];
+ 
+        // Get the target user's username for display
+        const [userRows] = await db.query(
+            "SELECT username FROM users WHERE id = ?",
+            [userId]
+        );
+ 
+        if (userRows.length === 0) {
+            return res.status(404).json({ success: false, error: "User not found" });
+        }
+ 
+        // Fetch following list with current viewer's follow status for each
+        const [following] = await db.query(
+            `SELECT
+                u.id,
+                u.username,
+                u.profile_picture,
+                u.is_private,
+                CASE WHEN f2.follower_id IS NOT NULL THEN 1 ELSE 0 END AS is_following,
+                COALESCE(fr.status, 'none') AS follow_status,
+                CASE WHEN fr.status = 'pending' THEN 1 ELSE 0 END AS is_request_active
+             FROM followers f
+             JOIN users u ON f.following_id = u.id
+             LEFT JOIN followers f2
+                ON f2.follower_id = ? AND f2.following_id = u.id
+             LEFT JOIN follow_requests fr
+                ON fr.follower_id = ? AND fr.following_id = u.id AND fr.status = 'pending'
+             WHERE f.follower_id = ?
+             ORDER BY u.username ASC`,
+            [currentUserId, currentUserId, userId]
+        );
+ 
+        res.status(200).json({
+            success: true,
+            data: {
+                username: userRows[0].username,
+                following: following.map((row) => ({
+                    ...row,
+                    is_following: !!row.is_following,
+                    is_request_active: !!row.is_request_active,
+                })),
+            },
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
     }
 });
 
