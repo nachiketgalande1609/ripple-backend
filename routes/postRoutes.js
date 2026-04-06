@@ -1016,4 +1016,102 @@ async function fetchPostDetails(userId, postId, currentUserId, res) {
     }
 }
 
+router.get("/:postId", async (req, res) => {
+    const currentUserId = req.headers["x-current-user-id"];
+    const { postId } = req.params;
+
+    try {
+        // 1. Get post + user
+        const [postResult] = await db.query(
+            `
+            SELECT 
+                p.*, 
+                u.username, 
+                u.profile_picture, 
+                u.is_private
+            FROM posts p
+            JOIN users u ON p.user_id = u.id
+            WHERE p.id = ?
+        `,
+            [postId],
+        );
+
+        if (postResult.length === 0) {
+            return res.status(404).json({
+                success: false,
+                error: "Post not found",
+                data: null,
+            });
+        }
+
+        const post = postResult[0];
+
+        // 2. Privacy check
+        if (post.is_private && currentUserId != post.user_id) {
+            const [follow] = await db.query(`SELECT 1 FROM followers WHERE follower_id = ? AND following_id = ?`, [currentUserId, post.user_id]);
+
+            if (follow.length === 0) {
+                return res.status(403).json({
+                    success: false,
+                    error: "Private account",
+                    data: null,
+                });
+            }
+        }
+
+        // 3. Likes
+        const [[{ like_count }]] = await db.query(`SELECT COUNT(*) AS like_count FROM likes WHERE post_id = ?`, [postId]);
+
+        const [liked] = await db.query(`SELECT 1 FROM likes WHERE user_id = ? AND post_id = ?`, [currentUserId, postId]);
+
+        // 4. Saved
+        const [saved] = await db.query(`SELECT 1 FROM saved_posts WHERE user_id = ? AND post_id = ?`, [currentUserId, postId]);
+
+        // 5. Comments
+        const [comments] = await db.query(
+            `
+            SELECT 
+                c.*,
+                u.username AS commenter_username,
+                u.profile_picture AS commenter_profile_picture,
+                COUNT(cl.id) AS likes_count,
+                MAX(CASE WHEN cl.user_id = ? THEN 1 ELSE 0 END) AS liked_by_user
+            FROM comments c
+            JOIN users u ON c.user_id = u.id
+            LEFT JOIN comment_likes cl ON cl.comment_id = c.id
+            WHERE c.post_id = ?
+            GROUP BY c.id
+            ORDER BY c.created_at DESC
+        `,
+            [currentUserId, postId],
+        );
+
+        comments.forEach((c) => {
+            c.timeAgo = getTimeAgo(new Date(c.created_at));
+        });
+
+        // 6. Final response
+        return res.status(200).json({
+            success: true,
+            error: null,
+            data: {
+                ...post,
+                like_count,
+                liked_by_current_user: liked.length > 0 ? 1 : 0,
+                saved_by_current_user: saved.length > 0 ? 1 : 0,
+                comment_count: comments.length,
+                comments,
+                timeAgo: getTimeAgo(new Date(post.created_at)),
+            },
+        });
+    } catch (err) {
+        console.error("Error fetching post:", err);
+        return res.status(500).json({
+            success: false,
+            error: err.message,
+            data: null,
+        });
+    }
+});
+
 module.exports = router;
