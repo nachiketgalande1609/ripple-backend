@@ -44,7 +44,7 @@ router.post("/", async (req, res) => {
              (user_id, sender_id, type, message, follow_request_id, created_at)
              VALUES (?, ?, 'follow_request', ?, ?, CONVERT_TZ(NOW(), 'UTC', 'Asia/Kolkata'))`,
             [followingId, followerId, "has sent you a follow request.", result.insertId],
-        );
+        );        
 
         emitUnreadNotificationCount(followingId);
 

@@ -27,122 +27,63 @@ const s3 = new S3Client({
 
 // Like Post
 router.post("/like-post", async (req, res) => {
-  const currentUserId = req.headers["x-current-user-id"];
+  const currentUserId = Number(req.headers["x-current-user-id"]);
   const { postId } = req.body;
 
   if (!currentUserId || !postId) {
-    return res.status(400).json({
-      success: false,
-      error: "User ID and Post ID are required.",
-      data: null,
-    });
+    return res
+      .status(400)
+      .json({ success: false, error: "User ID and Post ID are required." });
   }
 
   try {
-    const [existingLike] = await db.query(
-      "SELECT * FROM likes WHERE user_id = ? AND post_id = ?",
+    const [[existingLike]] = await db.query(
+      "SELECT id FROM likes WHERE user_id = ? AND post_id = ?",
       [currentUserId, postId],
     );
 
-    if (existingLike.length > 0) {
-      // Unlike the post
+    if (existingLike) {
       await db.query("DELETE FROM likes WHERE user_id = ? AND post_id = ?", [
         currentUserId,
         postId,
       ]);
-
-      const [likeCountResult] = await db.query(
-        "SELECT COUNT(*) AS like_count FROM likes WHERE post_id = ?",
-        [postId],
-      );
-
-      return res.status(200).json({
-        success: true,
-        message: "Post unliked successfully.",
-        like_count: likeCountResult[0].like_count,
-      });
     } else {
-      // Like the post
       await db.query(
         "INSERT INTO likes (user_id, post_id, created_at) VALUES (?, ?, CONVERT_TZ(NOW(), 'UTC', 'Asia/Kolkata'))",
         [currentUserId, postId],
       );
 
-      const [postResult] = await db.query(
+      const [[post]] = await db.query(
         "SELECT user_id FROM posts WHERE id = ?",
         [postId],
       );
+      if (!post)
+        return res
+          .status(404)
+          .json({ success: false, error: "Post not found." });
 
-      const postAuthorId = postResult[0]?.user_id;
-
-      if (!postAuthorId) {
-        return res.status(404).json({
-          success: false,
-          error: "Post not found.",
-          data: null,
-        });
-      }
-
-      // If liking own post
-      if (currentUserId === postAuthorId) {
-        const [likeCountResult] = await db.query(
-          "SELECT COUNT(*) AS like_count FROM likes WHERE post_id = ?",
-          [postId],
-        );
-
-        return res.status(200).json({
-          success: true,
-          message: "You liked your own post.",
-          like_count: likeCountResult[0].like_count,
-        });
-      }
-
-      const [userResult] = await db.query(
-        "SELECT username FROM users WHERE id = ?",
-        [currentUserId],
-      );
-
-      const userName = userResult[0]?.username;
-
-      if (!userName) {
-        return res.status(404).json({
-          success: false,
-          error: "User not found.",
-          data: null,
-        });
-      }
-
-      if (currentUserId != postAuthorId) {
-        const notificationMessage = `liked your post.`;
-
+      const isOwnPost = currentUserId === post.user_id;
+      if (!isOwnPost) {
         await createNotification(
-          postAuthorId,
+          post.user_id,
           currentUserId,
           "like",
-          notificationMessage,
+          "liked your post.",
           postId,
         );
-        emitUnreadNotificationCount(postAuthorId);
-        emitNotifications(postAuthorId, notificationMessage);
+        emitUnreadNotificationCount(post.user_id);
+        emitNotifications(post.user_id, "liked your post.");
       }
-
-      const [likeCountResult] = await db.query(
-        "SELECT COUNT(*) AS like_count FROM likes WHERE post_id = ?",
-        [postId],
-      );
-
-      return res.status(200).json({
-        success: true,
-        message: "Post liked successfully.",
-        like_count: likeCountResult[0].like_count,
-      });
     }
+
+    const [[{ like_count }]] = await db.query(
+      "SELECT COUNT(*) AS like_count FROM likes WHERE post_id = ?",
+      [postId],
+    );
+
+    return res.status(200).json({ success: true, like_count });
   } catch (err) {
-    return res.status(500).json({
-      success: false,
-      error: err.message,
-      data: null,
-    });
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 
