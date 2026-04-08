@@ -164,14 +164,14 @@ function initializeSocket(server, db) {
             }
 
             try {
-                if (reaction === null) {
-                    await db.query(`UPDATE messages SET reactions = JSON_REMOVE(reactions, CONCAT('$."', ? , '"')) WHERE message_id = ?`, [
+                if (reaction === null || reaction === "") {
+                    await db.query(`UPDATE messages SET reactions = JSON_REMOVE(reactions, CONCAT('$."', ?, '"')) WHERE message_id = ?`, [
                         senderUserId,
                         messageId,
                     ]);
                 } else {
                     await db.query(
-                        `UPDATE messages SET reactions = JSON_SET(COALESCE(reactions, '{}'), CONCAT('$."', ? , '"'), ?) WHERE message_id = ?`,
+                        `UPDATE messages SET reactions = JSON_SET(COALESCE(reactions, '{}'), CONCAT('$."', ?, '"'), ?) WHERE message_id = ?`,
                         [senderUserId, reaction, messageId],
                     );
                 }
