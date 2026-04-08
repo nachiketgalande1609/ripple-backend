@@ -83,7 +83,18 @@ function initializeSocket(server, db) {
                         [receiverId],
                     );
 
-                    io.to(receiverSocketId).emit("unreadMessagesCount", { unreadCount });
+                    const [[sender]] = await db.query(`SELECT username, profile_picture FROM users WHERE id = ?`, [senderId]);
+
+                    io.to(receiverSocketId).emit("unreadMessagesCount", {
+                        unreadCount,
+                        preview: {
+                            senderId, // ← NEW: needed for nav
+                            senderUsername: sender?.username ?? "Someone",
+                            senderProfilePicture: sender?.profile_picture ?? null,
+                            messageText: text || (fileUrl ? "📎 Attachment" : ""),
+                        },
+                    });
+
                     io.to(receiverSocketId).emit("receiveMessage", {
                         messageId,
                         senderId,
@@ -238,9 +249,7 @@ function initializeSocket(server, db) {
 
         socket.on("callUser", (data) => {
             const { from, to, signal, callerUsername, callerProfilePicture } = data;
-
             const receiverSocketId = userSockets[to];
-
             if (receiverSocketId) {
                 io.to(receiverSocketId).emit("callReceived", { signal, from, callerUsername, callerProfilePicture });
             } else {
@@ -277,7 +286,7 @@ function initializeSocket(server, db) {
                 if (userSockets[userId] === socket.id) {
                     delete userSockets[userId];
                     const onlineUsers = Object.keys(userSockets);
-                    io.emit("onlineUsers", onlineUsers); // broadcast to everyone, not just disconnected socket
+                    io.emit("onlineUsers", onlineUsers);
                     break;
                 }
             }
