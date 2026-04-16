@@ -288,8 +288,6 @@ router.get("/fetch-posts", async (req, res) => {
             LEFT JOIN saved_posts sp ON p.id = sp.post_id AND sp.user_id = ?
             WHERE p.user_id IN (
                 SELECT following_id FROM followers WHERE follower_id = ?
-                UNION
-                SELECT ?
             )
             ORDER BY p.created_at DESC;
         `;
