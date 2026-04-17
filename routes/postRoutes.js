@@ -72,7 +72,7 @@ router.post("/like-post", async (req, res) => {
           postId,
         );
         emitUnreadNotificationCount(post.user_id);
-        emitNotifications(post.user_id, "liked your post.");
+        // emitNotifications(post.user_id, "liked your post.");
       }
     }
 
