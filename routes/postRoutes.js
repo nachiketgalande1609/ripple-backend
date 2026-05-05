@@ -392,6 +392,8 @@ router.get("/fetch-posts", async (req, res) => {
 router.get("/fetch-profile-posts", async (req, res) => {
   const currentUserId = req.headers["x-current-user-id"];
   const { userId } = req.query;
+  const limit = Math.min(parseInt(req.query.limit) || 9, 50);
+  const offset = parseInt(req.query.offset) || 0;
 
   try {
     // Check if the user exists and is private
@@ -430,7 +432,7 @@ router.get("/fetch-profile-posts", async (req, res) => {
     }
 
     // Fetch posts if public or following
-    await fetchPosts(userId, res);
+    await fetchPosts(userId, res, limit, offset);
   } catch (err) {
     return res.status(500).json({
       success: false,
@@ -932,7 +934,7 @@ router.post("/like-comment", async (req, res) => {
   }
 });
 
-async function fetchPosts(userId, res) {
+async function fetchPosts(userId, res, limit = 9, offset = 0) {
   try {
     const postsQuery = `
             SELECT
@@ -943,23 +945,17 @@ async function fetchPosts(userId, res) {
             WHERE
                 p.user_id = ?
             ORDER BY
-                p.created_at DESC;
+                p.created_at DESC
+            LIMIT ? OFFSET ?;
         `;
 
-    const [result] = await db.query(postsQuery, [userId]);
-
-    if (result.length === 0) {
-      return res.status(200).json({
-        success: true,
-        error: null,
-        data: [],
-      });
-    }
+    const [result] = await db.query(postsQuery, [userId, limit, offset]);
 
     return res.status(200).json({
       success: true,
       error: null,
       data: result,
+      hasMore: result.length === limit,
     });
   } catch (err) {
     console.error("Error fetching posts:", err);
