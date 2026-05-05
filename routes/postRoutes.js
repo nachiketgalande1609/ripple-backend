@@ -277,6 +277,8 @@ router.post("/save-post", async (req, res) => {
 router.get("/fetch-posts", async (req, res) => {
   try {
     const userId = req.headers["x-current-user-id"];
+    const limit = Math.min(parseInt(req.query.limit) || 10, 50);
+    const offset = parseInt(req.query.offset) || 0;
 
     const postsQuery = `
             SELECT u.username,
@@ -289,10 +291,11 @@ router.get("/fetch-posts", async (req, res) => {
             WHERE p.user_id IN (
                 SELECT following_id FROM followers WHERE follower_id = ?
             )
-            ORDER BY p.created_at DESC;
+            ORDER BY p.created_at DESC
+            LIMIT ? OFFSET ?;
         `;
 
-    const [postsResult] = await db.query(postsQuery, [userId, userId, userId]);
+    const [postsResult] = await db.query(postsQuery, [userId, userId, limit, offset]);
     if (!postsResult.length) {
       return res.status(200).json({ success: true, error: null, data: [] });
     }
@@ -373,6 +376,7 @@ router.get("/fetch-posts", async (req, res) => {
       success: true,
       error: null,
       data: finalPosts,
+      hasMore: finalPosts.length === limit,
     });
   } catch (error) {
     console.error("Error fetching posts:", error);
