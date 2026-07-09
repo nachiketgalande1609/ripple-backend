@@ -123,6 +123,7 @@ CREATE TABLE `messages` (
   `media_height` int DEFAULT NULL,
   `reactions` json DEFAULT NULL,
   `post_id` int DEFAULT NULL,
+  `encrypted_keys` json DEFAULT NULL,
   PRIMARY KEY (`message_id`),
   KEY `sender_id` (`sender_id`),
   KEY `receiver_id` (`receiver_id`),
@@ -133,6 +134,18 @@ CREATE TABLE `messages` (
   CONSTRAINT `messages_ibfk_1` FOREIGN KEY (`sender_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
   CONSTRAINT `messages_ibfk_2` FOREIGN KEY (`receiver_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB AUTO_INCREMENT=1027 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+
+CREATE TABLE `user_keys` (
+  `key_id`     int NOT NULL AUTO_INCREMENT,
+  `user_id`    int NOT NULL,
+  `device_id`  varchar(255) NOT NULL,
+  `public_key` text NOT NULL,
+  `created_at` datetime DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`key_id`),
+  UNIQUE KEY `user_device` (`user_id`,`device_id`),
+  CONSTRAINT `fk_user_keys_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 
 CREATE TABLE `notifications` (

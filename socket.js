@@ -60,6 +60,7 @@ function initializeSocket(server, db) {
         mediaWidth,
         mediaHeight,
         postId,
+        encryptedKeys, // { iv, keys: [{deviceId, encryptedKey}] } or null for legacy
       } = data;
 
       const receiverSocketId = userSockets[receiverId];
@@ -69,12 +70,13 @@ function initializeSocket(server, db) {
 
       try {
         const [results] = await db.query(
-          `INSERT INTO messages (sender_id, receiver_id, message_text, file_url, file_name, file_size, timestamp, delivered, delivered_timestamp, reply_to, media_width, media_height, post_id) 
-                     VALUES (?, ?, ?, ?, ?, ?, CONVERT_TZ(NOW(), 'UTC', 'Asia/Kolkata'), ?, ?, ?, ?, ?, ?);`,
+          `INSERT INTO messages (sender_id, receiver_id, message_text, encrypted_keys, file_url, file_name, file_size, timestamp, delivered, delivered_timestamp, reply_to, media_width, media_height, post_id)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, CONVERT_TZ(NOW(), 'UTC', 'Asia/Kolkata'), ?, ?, ?, ?, ?, ?);`,
           [
             senderId,
             receiverId,
             text,
+            encryptedKeys ? JSON.stringify(encryptedKeys) : null,
             fileUrl,
             fileName,
             fileSize,
@@ -129,14 +131,17 @@ function initializeSocket(server, db) {
 
             io.to(receiverSocketId).emit("unreadMessagesCount", {
               unreadCount,
-              // Only include preview if sender is not muted
+              // Only include preview if sender is not muted.
+              // When encrypted, we cannot show message text — show generic preview instead.
               preview: isMuted
                 ? null
                 : {
                     senderId: senderId,
                     senderUsername: sender.username,
                     senderProfilePicture: sender.profile_picture,
-                    messageText: text || (fileUrl ? "Sent an attachment" : ""),
+                    messageText: encryptedKeys
+                      ? (fileUrl ? "Sent an attachment" : "Sent a message")
+                      : (text || (fileUrl ? "Sent an attachment" : "")),
                   },
             });
           }
@@ -145,6 +150,7 @@ function initializeSocket(server, db) {
             messageId,
             senderId,
             message_text: text,
+            encrypted_keys: encryptedKeys ?? null,
             timestamp: new Date().toISOString(),
             fileUrl,
             fileName,
