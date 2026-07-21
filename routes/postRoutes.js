@@ -89,7 +89,7 @@ router.post("/like-post", async (req, res) => {
 
 router.post("/submit-post-comment", async (req, res) => {
   const currentUserId = req.headers["x-current-user-id"];
-  const { postId, comment } = req.body;
+  const { postId, comment, parentCommentId } = req.body;
 
   if (!currentUserId || !postId || !comment) {
     return res.status(400).json({
@@ -101,8 +101,8 @@ router.post("/submit-post-comment", async (req, res) => {
 
   try {
     const [insertResult] = await db.query(
-      "INSERT INTO comments (user_id, post_id, content, created_at) VALUES (?, ?, ?, CONVERT_TZ(NOW(), 'UTC', 'Asia/Kolkata'))",
-      [currentUserId, postId, comment],
+      "INSERT INTO comments (user_id, post_id, content, parent_comment_id, created_at) VALUES (?, ?, ?, ?, CONVERT_TZ(NOW(), 'UTC', 'Asia/Kolkata'))",
+      [currentUserId, postId, comment, parentCommentId || null],
     );
 
     const commentId = insertResult.insertId;
@@ -122,16 +122,30 @@ router.post("/submit-post-comment", async (req, res) => {
       });
     }
 
-    if (currentUserId === postAuthorId) {
-      return res.status(200).json({
-        success: true,
-        message: "You commented on your own post.",
-        commentId,
-      });
+    // Notify parent comment author (if this is a reply and they're not the commenter)
+    if (parentCommentId) {
+      const [parentResult] = await db.query(
+        "SELECT user_id FROM comments WHERE id = ?",
+        [parentCommentId],
+      );
+      const parentAuthorId = parentResult[0]?.user_id;
+      if (parentAuthorId && parentAuthorId != currentUserId) {
+        await createNotification(
+          parentAuthorId,
+          currentUserId,
+          "comment",
+          `replied to your comment: "${comment}"`,
+          postId,
+          commentId,
+        );
+        emitUnreadNotificationCount(parentAuthorId);
+      }
     }
 
     if (postAuthorId != currentUserId) {
-      const notificationMessage = `commented on your post: "${comment}"`;
+      const notificationMessage = parentCommentId
+        ? `replied to a comment on your post: "${comment}"`
+        : `commented on your post: "${comment}"`;
 
       await createNotification(
         postAuthorId,
