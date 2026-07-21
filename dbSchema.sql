@@ -224,3 +224,17 @@ CREATE TABLE `story_views` (
   CONSTRAINT `story_views_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`),
   CONSTRAINT `story_views_ibfk_2` FOREIGN KEY (`story_id`) REFERENCES `stories` (`id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=23 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+
+CREATE TABLE IF NOT EXISTS user_key_backups (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  device_id VARCHAR(255) NOT NULL,
+  encrypted_private_key LONGTEXT NOT NULL,
+  salt VARCHAR(64) NOT NULL,
+  iv VARCHAR(32) NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY user_backup (user_id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
