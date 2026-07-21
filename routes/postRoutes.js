@@ -374,6 +374,19 @@ router.get("/fetch-posts", async (req, res) => {
       return acc;
     }, {});
 
+    // Tagged users per post
+    const [taggedRows] = await db.query(
+      `SELECT pt.post_id, u.id, u.username, u.profile_picture
+       FROM post_tags pt JOIN users u ON u.id = pt.tagged_user_id
+       WHERE pt.post_id IN (?)`,
+      [postIds],
+    );
+    const taggedByPostId = taggedRows.reduce((acc, row) => {
+      if (!acc[row.post_id]) acc[row.post_id] = [];
+      acc[row.post_id].push({ id: row.id, username: row.username, profile_picture: row.profile_picture });
+      return acc;
+    }, {});
+
     // Finalizing post objects
     const finalPosts = postsResult.map((post) => {
       return {
@@ -383,6 +396,7 @@ router.get("/fetch-posts", async (req, res) => {
         liked_by_current_user: likedPostsByCurrentUser.has(post.id) ? 1 : 0,
         comment_count: commentsByPostId[post.id]?.length || 0,
         comments: commentsByPostId[post.id] || [],
+        tagged_users: taggedByPostId[post.id] || [],
       };
     });
 
@@ -576,6 +590,20 @@ router.post("/create-post", upload.single("image"), async (req, res) => {
 
     const postId = result.insertId;
     await saveHashtags(postId, content);
+
+    // Handle tagged users
+    let taggedUsers = [];
+    try { taggedUsers = req.body.taggedUsers ? JSON.parse(req.body.taggedUsers) : []; } catch {}
+    for (const taggedUserId of taggedUsers) {
+      await db.query(
+        "INSERT IGNORE INTO post_tags (post_id, tagged_user_id) VALUES (?, ?)",
+        [postId, taggedUserId]
+      );
+      if (taggedUserId != user_id) {
+        await createNotification(taggedUserId, user_id, "tag", "tagged you in a post", postId, null);
+        emitUnreadNotificationCount(taggedUserId);
+      }
+    }
 
     return res.status(201).json({
       success: true,
@@ -948,6 +976,39 @@ router.post("/like-comment", async (req, res) => {
   }
 });
 
+/* ── Fetch tagged posts for a user ── */
+router.get("/fetch-tagged-posts/:userId", async (req, res) => {
+  const { userId } = req.params;
+  const currentUserId = req.headers["x-current-user-id"];
+  const limit = parseInt(req.query.limit) || 12;
+  const offset = parseInt(req.query.offset) || 0;
+  try {
+    const [posts] = await db.query(
+      `SELECT p.id, p.file_url, p.content, p.location, p.created_at,
+              p.media_width, p.media_height,
+              u.username, u.profile_picture,
+              (SELECT COUNT(*) FROM likes WHERE post_id = p.id) AS likes_count,
+              (SELECT COUNT(*) FROM comments WHERE post_id = p.id) AS comments_count,
+              EXISTS(SELECT 1 FROM likes WHERE post_id = p.id AND user_id = ?) AS liked_by_current_user,
+              EXISTS(SELECT 1 FROM saved_posts WHERE post_id = p.id AND user_id = ?) AS saved_by_current_user
+       FROM post_tags pt
+       JOIN posts p ON p.id = pt.post_id
+       JOIN users u ON u.id = p.user_id
+       WHERE pt.tagged_user_id = ?
+       ORDER BY p.created_at DESC
+       LIMIT ? OFFSET ?`,
+      [currentUserId, currentUserId, userId, limit, offset]
+    );
+    const [[{ total }]] = await db.query(
+      "SELECT COUNT(*) AS total FROM post_tags WHERE tagged_user_id = ?",
+      [userId]
+    );
+    return res.json({ success: true, data: posts, hasMore: offset + posts.length < total });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 async function fetchPosts(userId, res, limit = 9, offset = 0) {
   try {
     const postsQuery = `
@@ -1173,7 +1234,15 @@ router.get("/:postId", async (req, res) => {
       c.timeAgo = getTimeAgo(new Date(c.created_at));
     });
 
-    // 6. Final response
+    // 6. Tagged users
+    const [taggedUsers] = await db.query(
+      `SELECT u.id, u.username, u.profile_picture
+       FROM post_tags pt JOIN users u ON u.id = pt.tagged_user_id
+       WHERE pt.post_id = ?`,
+      [postId],
+    );
+
+    // 7. Final response
     return res.status(200).json({
       success: true,
       error: null,
@@ -1184,6 +1253,7 @@ router.get("/:postId", async (req, res) => {
         saved_by_current_user: saved.length > 0 ? 1 : 0,
         comment_count: comments.length,
         comments,
+        tagged_users: taggedUsers,
         timeAgo: getTimeAgo(new Date(post.created_at)),
       },
     });
@@ -1194,6 +1264,48 @@ router.get("/:postId", async (req, res) => {
       error: err.message,
       data: null,
     });
+  }
+});
+
+/* ── Update post tags ── */
+router.put("/update-tags/:postId", async (req, res) => {
+  const { postId } = req.params;
+  const { taggedUsers = [] } = req.body; // array of user ids
+  const currentUserId = req.headers["x-current-user-id"];
+  try {
+    // verify ownership
+    const [[post]] = await db.query("SELECT user_id FROM posts WHERE id = ?", [postId]);
+    if (!post || post.user_id != currentUserId)
+      return res.status(403).json({ success: false, error: "Not authorized" });
+
+    // get existing tags to diff
+    const [existing] = await db.query("SELECT tagged_user_id FROM post_tags WHERE post_id = ?", [postId]);
+    const existingIds = existing.map((r) => r.tagged_user_id);
+    const toAdd = taggedUsers.filter((id) => !existingIds.includes(id));
+    const toRemove = existingIds.filter((id) => !taggedUsers.includes(id));
+
+    console.log("[update-tags] existingIds:", existingIds, "toAdd:", toAdd, "toRemove:", toRemove);
+    for (const uid of toAdd) {
+      await db.query("INSERT IGNORE INTO post_tags (post_id, tagged_user_id) VALUES (?, ?)", [postId, uid]);
+      console.log("[update-tags] uid:", uid, "currentUserId:", currentUserId, "same?", uid == currentUserId);
+      if (uid != currentUserId) {
+        const notifResult = await createNotification(uid, currentUserId, "tag", "tagged you in a post", postId, null);
+        console.log("[update-tags] notification created:", notifResult?.insertId);
+        emitUnreadNotificationCount(uid);
+      }
+    }
+    for (const uid of toRemove) {
+      await db.query("DELETE FROM post_tags WHERE post_id = ? AND tagged_user_id = ?", [postId, uid]);
+    }
+
+    const [updated] = await db.query(
+      `SELECT u.id, u.username, u.profile_picture FROM post_tags pt JOIN users u ON u.id = pt.tagged_user_id WHERE pt.post_id = ?`,
+      [postId],
+    );
+    return res.json({ success: true, data: updated });
+  } catch (err) {
+    console.error("[update-tags] error:", err.message);
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 
