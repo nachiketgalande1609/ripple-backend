@@ -387,6 +387,17 @@ router.get("/fetch-posts", async (req, res) => {
       return acc;
     }, {});
 
+    // Carousel media per post
+    const [mediaRows] = await db.query(
+      `SELECT post_id, file_url, media_order FROM post_media WHERE post_id IN (?) ORDER BY media_order ASC`,
+      [postIds],
+    );
+    const mediaByPostId = mediaRows.reduce((acc, row) => {
+      if (!acc[row.post_id]) acc[row.post_id] = [];
+      acc[row.post_id].push(row.file_url);
+      return acc;
+    }, {});
+
     // Finalizing post objects
     const finalPosts = postsResult.map((post) => {
       return {
@@ -397,6 +408,7 @@ router.get("/fetch-posts", async (req, res) => {
         comment_count: commentsByPostId[post.id]?.length || 0,
         comments: commentsByPostId[post.id] || [],
         tagged_users: taggedByPostId[post.id] || [],
+        media_files: mediaByPostId[post.id] || [],
       };
     });
 
@@ -523,56 +535,54 @@ router.get("/fetch-post-details", async (req, res) => {
 });
 
 // Create Post
-router.post("/create-post", upload.single("image"), async (req, res) => {
+router.post("/create-post", upload.array("images", 10), async (req, res) => {
   const { content, location, user_id } = req.body;
-  const file = req.file;
+  const files = req.files;
 
-  if (!content || !file) {
+  if (!content || !files || files.length === 0) {
     return res.status(400).json({
       success: false,
-      error: "Content and a photo or video are required.", // was "image are required"
+      error: "Content and a photo or video are required.",
       data: null,
     });
   }
 
-  const fileName = file.originalname;
-  const fileType = file.mimetype;
-  let mediaWidth = null;
-  let mediaHeight = null;
-  let resizedImageBuffer;
+  // Helper: upload a single file buffer to S3, return URL
+  async function uploadFileToS3(file) {
+    const fileType = file.mimetype;
+    let buffer = file.buffer;
+    let mediaWidth = null;
+    let mediaHeight = null;
 
-  if (fileType.startsWith("image/")) {
-    try {
+    if (fileType.startsWith("image/")) {
       const image = sharp(file.buffer).resize({ width: 1080 });
-      resizedImageBuffer = await image.toBuffer();
-      const metadata = await sharp(resizedImageBuffer).metadata();
+      buffer = await image.toBuffer();
+      const metadata = await sharp(buffer).metadata();
       mediaWidth = metadata.width;
       mediaHeight = metadata.height;
-    } catch (err) {
-      console.error("Error processing image:", err);
-      return res.status(500).json({
-        success: false,
-        error: "Failed to process image.",
-        data: null,
-      });
     }
-  } else {
-    resizedImageBuffer = file.buffer;
+
+    const key = `uploads/${Date.now()}_${Math.random().toString(36).slice(2)}_${file.originalname}`;
+    await s3.send(new PutObjectCommand({
+      Bucket: process.env.AWS_S3_BUCKET_NAME,
+      Key: key,
+      Body: buffer,
+      ContentType: fileType,
+      ACL: "public-read",
+    }));
+
+    return {
+      url: `https://${process.env.AWS_S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`,
+      mediaWidth,
+      mediaHeight,
+    };
   }
 
-  const uploadParams = {
-    Bucket: process.env.AWS_S3_BUCKET_NAME,
-    Key: `uploads/${Date.now()}_${fileName}`,
-    Body: resizedImageBuffer,
-    ContentType: fileType,
-    ACL: "public-read",
-  };
-
   try {
-    const command = new PutObjectCommand(uploadParams);
-    await s3.send(command);
+    // Upload all files in parallel
+    const uploaded = await Promise.all(files.map(uploadFileToS3));
 
-    const fileUrl = `https://${uploadParams.Bucket}.s3.${process.env.AWS_REGION}.amazonaws.com/${uploadParams.Key}`;
+    const firstFile = uploaded[0];
 
     const insertQuery = `
             INSERT INTO posts (content, file_url, location, user_id, media_width, media_height)
@@ -581,14 +591,24 @@ router.post("/create-post", upload.single("image"), async (req, res) => {
 
     const [result] = await db.query(insertQuery, [
       content,
-      fileUrl,
+      firstFile.url,
       location,
       user_id,
-      mediaWidth,
-      mediaHeight,
+      firstFile.mediaWidth,
+      firstFile.mediaHeight,
     ]);
 
     const postId = result.insertId;
+
+    // Store all media in post_media (including first for consistency)
+    if (uploaded.length > 1) {
+      const mediaValues = uploaded.map((u, i) => [postId, u.url, i, u.mediaWidth, u.mediaHeight]);
+      await db.query(
+        "INSERT INTO post_media (post_id, file_url, media_order, media_width, media_height) VALUES ?",
+        [mediaValues]
+      );
+    }
+
     await saveHashtags(postId, content);
 
     // Handle tagged users
@@ -609,10 +629,10 @@ router.post("/create-post", upload.single("image"), async (req, res) => {
       success: true,
       error: null,
       message: "Post created successfully",
-      postId: result.insertId,
-      fileUrl,
-      mediaWidth,
-      mediaHeight,
+      postId,
+      fileUrl: firstFile.url,
+      mediaWidth: firstFile.mediaWidth,
+      mediaHeight: firstFile.mediaHeight,
     });
   } catch (error) {
     console.error("Error creating post:", error);
@@ -1242,7 +1262,14 @@ router.get("/:postId", async (req, res) => {
       [postId],
     );
 
-    // 7. Final response
+    // 7. Carousel media
+    const [mediaRows] = await db.query(
+      `SELECT file_url FROM post_media WHERE post_id = ? ORDER BY media_order ASC`,
+      [postId],
+    );
+    const media_files = mediaRows.map((r) => r.file_url);
+
+    // 8. Final response
     return res.status(200).json({
       success: true,
       error: null,
@@ -1254,6 +1281,7 @@ router.get("/:postId", async (req, res) => {
         comment_count: comments.length,
         comments,
         tagged_users: taggedUsers,
+        media_files,
         timeAgo: getTimeAgo(new Date(post.created_at)),
       },
     });

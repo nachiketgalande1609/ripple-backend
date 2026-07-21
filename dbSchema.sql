@@ -196,6 +196,19 @@ CREATE TABLE `post_tags` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 
+CREATE TABLE IF NOT EXISTS `post_media` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `post_id` int NOT NULL,
+  `file_url` varchar(500) NOT NULL,
+  `media_order` int NOT NULL DEFAULT 0,
+  `media_width` int DEFAULT NULL,
+  `media_height` int DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `post_id` (`post_id`),
+  CONSTRAINT `post_media_ibfk_1` FOREIGN KEY (`post_id`) REFERENCES `posts` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+
 CREATE TABLE `search_history` (
   `id` int NOT NULL AUTO_INCREMENT,
   `user_id` int NOT NULL COMMENT 'User who performed the search',
