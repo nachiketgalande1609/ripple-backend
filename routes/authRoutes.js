@@ -6,6 +6,76 @@ const router = express.Router();
 const { sendEmail } = require("../utils/mailer");
 const crypto = require("crypto");
 const useragent = require("useragent");
+const https = require("https");
+const authMiddleware = require("../middleware/auth");
+
+// ── Session helpers ────────────────────────────────────────────────────────────
+
+async function ensureSessionsTable() {
+    await db.query(`
+        CREATE TABLE IF NOT EXISTS user_sessions (
+            id          INT AUTO_INCREMENT PRIMARY KEY,
+            user_id     INT NOT NULL,
+            ip          VARCHAR(64),
+            city        VARCHAR(128),
+            region      VARCHAR(128),
+            country     VARCHAR(64),
+            device_type VARCHAR(64),
+            browser     VARCHAR(128),
+            os          VARCHAR(128),
+            logged_in_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            last_active  DATETIME DEFAULT CURRENT_TIMESTAMP,
+            INDEX (user_id)
+        )
+    `);
+}
+ensureSessionsTable().catch(console.error);
+
+function getClientIp(req) {
+    const forwarded = req.headers["x-forwarded-for"];
+    if (forwarded) return forwarded.split(",")[0].trim();
+    return req.socket?.remoteAddress || "unknown";
+}
+
+function geoFromIp(ip) {
+    return new Promise((resolve) => {
+        // Skip loopback / private IPs
+        if (!ip || ip === "unknown" || ip === "::1" || ip.startsWith("192.168") || ip.startsWith("10.") || ip.startsWith("127.")) {
+            return resolve({ city: "Local", region: "", country: "" });
+        }
+        const url = `http://ip-api.com/json/${ip}?fields=city,regionName,country,status`;
+        try {
+            const http = require("http");
+            http.get(url, (res) => {
+                let body = "";
+                res.on("data", (d) => (body += d));
+                res.on("end", () => {
+                    try {
+                        const j = JSON.parse(body);
+                        if (j.status === "success") resolve({ city: j.city || "", region: j.regionName || "", country: j.country || "" });
+                        else resolve({ city: "", region: "", country: "" });
+                    } catch { resolve({ city: "", region: "", country: "" }); }
+                });
+            }).on("error", () => resolve({ city: "", region: "", country: "" }));
+        } catch { resolve({ city: "", region: "", country: "" }); }
+    });
+}
+
+async function recordSession(userId, req) {
+    try {
+        const ip = getClientIp(req);
+        const ua = useragent.parse(req.headers["user-agent"] || "");
+        const geo = await geoFromIp(ip);
+        const deviceType = /mobile|android|iphone|ipad/i.test(req.headers["user-agent"] || "") ? "Mobile" : "Desktop";
+        await db.query(
+            `INSERT INTO user_sessions (user_id, ip, city, region, country, device_type, browser, os, logged_in_at, last_active)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+            [userId, ip, geo.city, geo.region, geo.country, deviceType, ua.family, ua.os.family]
+        );
+    } catch (err) {
+        console.error("Failed to record session:", err);
+    }
+}
 
 const { OAuth2Client } = require("google-auth-library");
 const client = new OAuth2Client("702353220748-2lmc03lb4tcfnuqds67h8bbupmb1aa0q.apps.googleusercontent.com");
@@ -148,6 +218,8 @@ router.post("/login", async (req, res) => {
 
         const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET);
 
+        recordSession(user.id, req);
+
         return res.json({
             success: true,
             error: null,
@@ -209,6 +281,7 @@ router.post("/google-login", async (req, res) => {
         }
 
         // Send the user response
+        recordSession(user.id, req);
         sendResponse(user, res);
     } catch (error) {
         console.error("Error during Google login:", error);
@@ -573,6 +646,50 @@ router.post("/log", async (req, res) => {
             success: false,
             message: "Error tracking traffic",
         });
+    }
+});
+
+// ── Active sessions ────────────────────────────────────────────────────────────
+
+router.get("/sessions", authMiddleware, async (req, res) => {
+    const userId = req.user.userId || req.user.id;
+    try {
+        const [rows] = await db.query(
+            `SELECT id, ip, city, region, country, device_type, browser, os,
+                DATE_FORMAT(CONVERT_TZ(logged_in_at, @@session.time_zone, '+00:00'), '%Y-%m-%dT%H:%i:%sZ') AS logged_in_at,
+                DATE_FORMAT(CONVERT_TZ(last_active,  @@session.time_zone, '+00:00'), '%Y-%m-%dT%H:%i:%sZ') AS last_active
+             FROM user_sessions WHERE user_id = ? ORDER BY logged_in_at DESC LIMIT 20`,
+            [userId]
+        );
+        return res.json({ success: true, data: rows });
+    } catch (err) {
+        return res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+router.delete("/sessions/:sessionId", authMiddleware, async (req, res) => {
+    const userId = req.user.userId || req.user.id;
+    const { sessionId } = req.params;
+    try {
+        const [result] = await db.query(
+            "DELETE FROM user_sessions WHERE id = ? AND user_id = ?",
+            [sessionId, userId]
+        );
+        if (result.affectedRows === 0)
+            return res.status(404).json({ success: false, error: "Session not found" });
+        return res.json({ success: true });
+    } catch (err) {
+        return res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+router.delete("/sessions", authMiddleware, async (req, res) => {
+    const userId = req.user.userId || req.user.id;
+    try {
+        await db.query("DELETE FROM user_sessions WHERE user_id = ?", [userId]);
+        return res.json({ success: true });
+    } catch (err) {
+        return res.status(500).json({ success: false, error: err.message });
     }
 });
 
