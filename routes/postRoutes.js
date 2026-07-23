@@ -305,11 +305,16 @@ router.get("/fetch-posts", async (req, res) => {
             WHERE p.user_id IN (
                 SELECT following_id FROM followers WHERE follower_id = ?
             )
+            AND NOT EXISTS (
+                SELECT 1 FROM blocked_users b
+                WHERE (b.blocker_id = ? AND b.blocked_id = p.user_id)
+                   OR (b.blocker_id = p.user_id AND b.blocked_id = ?)
+            )
             ORDER BY p.created_at DESC
             LIMIT ? OFFSET ?;
         `;
 
-    const [postsResult] = await db.query(postsQuery, [userId, userId, limit, offset]);
+    const [postsResult] = await db.query(postsQuery, [userId, userId, userId, userId, limit, offset]);
     if (!postsResult.length) {
       return res.status(200).json({ success: true, error: null, data: [] });
     }

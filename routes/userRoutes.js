@@ -31,6 +31,19 @@ router.get("/fetch-profile-details", async (req, res) => {
 
         const user = userResults[0];
 
+        // Check if either user has blocked the other
+        if (currentUserId && currentUserId != userId) {
+            const [blockRows] = await db.query(
+                `SELECT 1 FROM blocked_users
+                 WHERE (blocker_id = ? AND blocked_id = ?) OR (blocker_id = ? AND blocked_id = ?)
+                 LIMIT 1`,
+                [currentUserId, userId, userId, currentUserId]
+            );
+            if (blockRows.length > 0) {
+                return res.status(403).json({ success: false, error: "blocked", data: null });
+            }
+        }
+
         // Execute all queries concurrently
         const [[postResults], [followersResults], [followingResults], [followRequestResults], [followResults]] = await Promise.all([
             db.query("SELECT COUNT(id) AS posts_count FROM posts WHERE user_id = ?", [userId]),

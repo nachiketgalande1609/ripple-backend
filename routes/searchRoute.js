@@ -5,6 +5,7 @@ const router = express.Router();
 router.get("/search-users", async (req, res) => {
   try {
     const { searchString } = req.query;
+    const currentUserId = req.headers["x-current-user-id"];
 
     if (!searchString || searchString.trim().length === 0) {
       return res.status(400).json({
@@ -15,13 +16,18 @@ router.get("/search-users", async (req, res) => {
     }
 
     const searchQuery = `
-      SELECT id, username, email, profile_picture 
-      FROM users 
-      WHERE username LIKE ? 
+      SELECT id, username, email, profile_picture
+      FROM users
+      WHERE username LIKE ?
+        AND NOT EXISTS (
+            SELECT 1 FROM blocked_users b
+            WHERE (b.blocker_id = ? AND b.blocked_id = users.id)
+               OR (b.blocker_id = users.id AND b.blocked_id = ?)
+        )
       LIMIT 10
     `;
 
-    const [results] = await db.query(searchQuery, [`%${searchString}%`]);
+    const [results] = await db.query(searchQuery, [`%${searchString}%`, currentUserId, currentUserId]);
 
     if (results.length === 0) {
       return res.status(200).json({
@@ -59,7 +65,7 @@ router.get("/fetch-search-history", async (req, res) => {
     }
 
     const query = `
-      SELECT 
+      SELECT
         sh.id AS history_id,
         sh.created_at,
         u.id AS id,
@@ -69,6 +75,11 @@ router.get("/fetch-search-history", async (req, res) => {
       FROM search_history sh
       JOIN users u ON sh.target_user_id = u.id
       WHERE sh.user_id = ?
+        AND NOT EXISTS (
+            SELECT 1 FROM blocked_users b
+            WHERE (b.blocker_id = sh.user_id AND b.blocked_id = u.id)
+               OR (b.blocker_id = u.id AND b.blocked_id = sh.user_id)
+        )
       ORDER BY sh.created_at DESC
       LIMIT 20
     `;

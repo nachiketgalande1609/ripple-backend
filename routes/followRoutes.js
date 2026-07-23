@@ -309,8 +309,13 @@ router.get("/:userId/followers", async (req, res) => {
              LEFT JOIN follow_requests fr
                 ON fr.follower_id = ? AND fr.following_id = u.id AND fr.status = 'pending'
              WHERE f.following_id = ?
+               AND NOT EXISTS (
+                   SELECT 1 FROM blocked_users b
+                   WHERE (b.blocker_id = ? AND b.blocked_id = u.id)
+                      OR (b.blocker_id = u.id AND b.blocked_id = ?)
+               )
              ORDER BY u.username ASC`,
-            [currentUserId, currentUserId, userId]
+            [currentUserId, currentUserId, userId, currentUserId, currentUserId]
         );
  
         res.status(200).json({
@@ -361,8 +366,13 @@ router.get("/:userId/following", async (req, res) => {
              LEFT JOIN follow_requests fr
                 ON fr.follower_id = ? AND fr.following_id = u.id AND fr.status = 'pending'
              WHERE f.follower_id = ?
+               AND NOT EXISTS (
+                   SELECT 1 FROM blocked_users b
+                   WHERE (b.blocker_id = ? AND b.blocked_id = u.id)
+                      OR (b.blocker_id = u.id AND b.blocked_id = ?)
+               )
              ORDER BY u.username ASC`,
-            [currentUserId, currentUserId, userId]
+            [currentUserId, currentUserId, userId, currentUserId, currentUserId]
         );
  
         res.status(200).json({

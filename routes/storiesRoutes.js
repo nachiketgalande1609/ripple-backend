@@ -61,12 +61,17 @@ router.get("/fetch-user-stories", async (req, res) => {
             WHERE (f.follower_id = ? OR s.user_id = ?)
             AND s.is_active = 1
             AND (s.expires_at IS NULL OR s.expires_at > CONVERT_TZ(NOW(), 'UTC', 'Asia/Kolkata'))
+            AND NOT EXISTS (
+                SELECT 1 FROM blocked_users b
+                WHERE (b.blocker_id = ? AND b.blocked_id = s.user_id)
+                   OR (b.blocker_id = s.user_id AND b.blocked_id = ?)
+            )
             GROUP BY s.id, u.id
             ORDER BY s.created_at DESC
         `;
 
         // ✅ PROMISE-BASED QUERY
-        const [results] = await db.query(query, [numericUserId, numericUserId]);
+        const [results] = await db.query(query, [numericUserId, numericUserId, numericUserId, numericUserId]);
 
         // ✅ Clean viewers (remove null objects)
         const processedResults = results.map((story) => {
