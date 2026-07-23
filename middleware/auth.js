@@ -15,8 +15,7 @@ const authMiddleware = async (req, res, next) => {
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-        // Check if this session has been revoked (using session ID embedded in JWT)
-        console.log("[auth] decoded.sid =", decoded.sid);
+        // Check revocation and update last_active
         if (decoded.sid) {
             try {
                 const [rows] = await db.query(
@@ -29,6 +28,9 @@ const authMiddleware = async (req, res, next) => {
                         error: "Session has been revoked",
                         data: null,
                     });
+                }
+                if (rows.length > 0) {
+                    db.query("UPDATE user_sessions SET last_active = NOW() WHERE id = ?", [decoded.sid]).catch(() => {});
                 }
             } catch (err) {
                 console.error("[auth] revocation check failed:", err.message);
