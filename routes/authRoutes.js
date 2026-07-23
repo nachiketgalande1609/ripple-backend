@@ -16,6 +16,7 @@ async function ensureSessionsTable() {
         CREATE TABLE IF NOT EXISTS user_sessions (
             id          INT AUTO_INCREMENT PRIMARY KEY,
             user_id     INT NOT NULL,
+            token       TEXT,
             ip          VARCHAR(64),
             city        VARCHAR(128),
             region      VARCHAR(128),
@@ -25,9 +26,13 @@ async function ensureSessionsTable() {
             os          VARCHAR(128),
             logged_in_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             last_active  DATETIME DEFAULT CURRENT_TIMESTAMP,
+            revoked     TINYINT(1) DEFAULT 0,
             INDEX (user_id)
         )
     `);
+    // Add token and revoked columns if table already existed without them
+    await db.query(`ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS token TEXT AFTER user_id`).catch(() => {});
+    await db.query(`ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS revoked TINYINT(1) DEFAULT 0`).catch(() => {});
 }
 ensureSessionsTable().catch(console.error);
 
@@ -67,13 +72,15 @@ async function recordSession(userId, req) {
         const ua = useragent.parse(req.headers["user-agent"] || "");
         const geo = await geoFromIp(ip);
         const deviceType = /mobile|android|iphone|ipad/i.test(req.headers["user-agent"] || "") ? "Mobile" : "Desktop";
-        await db.query(
+        const [result] = await db.query(
             `INSERT INTO user_sessions (user_id, ip, city, region, country, device_type, browser, os, logged_in_at, last_active)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
             [userId, ip, geo.city, geo.region, geo.country, deviceType, ua.family, ua.os.family]
         );
+        return result.insertId;
     } catch (err) {
         console.error("Failed to record session:", err);
+        return null;
     }
 }
 
@@ -216,9 +223,8 @@ router.post("/login", async (req, res) => {
             });
         }
 
-        const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET);
-
-        recordSession(user.id, req);
+        const sessionId = await recordSession(user.id, req);
+        const token = jwt.sign({ userId: user.id, sid: sessionId }, process.env.JWT_SECRET);
 
         return res.json({
             success: true,
@@ -280,9 +286,8 @@ router.post("/google-login", async (req, res) => {
             user = newUserResults[0];
         }
 
-        // Send the user response
-        recordSession(user.id, req);
-        sendResponse(user, res);
+        const sessionId = await recordSession(user.id, req);
+        sendResponse(user, res, sessionId);
     } catch (error) {
         console.error("Error during Google login:", error);
         return res.status(401).json({
@@ -294,15 +299,11 @@ router.post("/google-login", async (req, res) => {
 });
 
 // Helper function to send the response
-const sendResponse = (user, res) => {
+const sendResponse = (user, res, sessionId = null) => {
     const token = jwt.sign(
-        {
-            id: user.id,
-            email: user.email,
-            username: user.username,
-        },
+        { id: user.id, email: user.email, username: user.username, sid: sessionId },
         process.env.JWT_SECRET || "secret123",
-        { expiresIn: "1h" }, // Token expiration time
+        { expiresIn: "1h" },
     );
 
     // Return success response with user details and token
@@ -658,7 +659,7 @@ router.get("/sessions", authMiddleware, async (req, res) => {
             `SELECT id, ip, city, region, country, device_type, browser, os,
                 DATE_FORMAT(CONVERT_TZ(logged_in_at, @@session.time_zone, '+00:00'), '%Y-%m-%dT%H:%i:%sZ') AS logged_in_at,
                 DATE_FORMAT(CONVERT_TZ(last_active,  @@session.time_zone, '+00:00'), '%Y-%m-%dT%H:%i:%sZ') AS last_active
-             FROM user_sessions WHERE user_id = ? ORDER BY logged_in_at DESC LIMIT 20`,
+             FROM user_sessions WHERE user_id = ? AND revoked = 0 ORDER BY logged_in_at DESC LIMIT 20`,
             [userId]
         );
         return res.json({ success: true, data: rows });
@@ -672,7 +673,7 @@ router.delete("/sessions/:sessionId", authMiddleware, async (req, res) => {
     const { sessionId } = req.params;
     try {
         const [result] = await db.query(
-            "DELETE FROM user_sessions WHERE id = ? AND user_id = ?",
+            "UPDATE user_sessions SET revoked = 1 WHERE id = ? AND user_id = ?",
             [sessionId, userId]
         );
         if (result.affectedRows === 0)
@@ -686,7 +687,7 @@ router.delete("/sessions/:sessionId", authMiddleware, async (req, res) => {
 router.delete("/sessions", authMiddleware, async (req, res) => {
     const userId = req.user.userId || req.user.id;
     try {
-        await db.query("DELETE FROM user_sessions WHERE user_id = ?", [userId]);
+        await db.query("UPDATE user_sessions SET revoked = 1 WHERE user_id = ?", [userId]);
         return res.json({ success: true });
     } catch (err) {
         return res.status(500).json({ success: false, error: err.message });
