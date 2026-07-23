@@ -238,4 +238,20 @@ router.put("/profile/update-profile-details", async (req, res) => {
     }
 });
 
+// POST /api/users/record-view/:profileUserId
+router.post("/record-view/:profileUserId", async (req, res) => {
+    const { profileUserId } = req.params;
+    const viewerId = req.headers["x-current-user-id"];
+    if (!viewerId || String(viewerId) === String(profileUserId)) return res.json({ ok: false });
+    try {
+        await db.query(
+            "INSERT INTO profile_views (profile_user_id, viewer_id) VALUES (?, ?)",
+            [profileUserId, viewerId]
+        );
+        res.json({ ok: true });
+    } catch {
+        res.json({ ok: false });
+    }
+});
+
 module.exports = router;

@@ -188,7 +188,7 @@ router.post("/login", async (req, res) => {
     const { email, password } = req.body;
 
     const query = `
-        SELECT id, username, email, password, profile_picture, is_private, is_verified
+        SELECT id, username, email, password, profile_picture, is_private, is_verified, is_deactivated
         FROM users
         WHERE email = ?
     `;
@@ -212,6 +212,11 @@ router.post("/login", async (req, res) => {
                 error: "Please verify your email before logging in.",
                 data: null,
             });
+        }
+
+        if (user.is_deactivated) {
+            // Reactivate on login
+            await db.query("UPDATE users SET is_deactivated = 0, deactivated_at = NULL WHERE id = ?", [user.id]);
         }
 
         const isMatch = await bcrypt.compare(password, user.password);

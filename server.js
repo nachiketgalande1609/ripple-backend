@@ -31,6 +31,7 @@ const settingsRoutes = require("./routes/settingsRoutes");
 const messagesRoutes = require("./routes/messagesRoute");
 const storiesRoutes = require("./routes/storiesRoutes");
 const keysRoutes = require("./routes/keysRoute");
+const insightsRoutes = require("./routes/insightsRoutes");
 
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
@@ -42,6 +43,7 @@ app.use("/api/settings", settingsRoutes);
 app.use("/api/messages", messagesRoutes);
 app.use("/api/stories", storiesRoutes);
 app.use("/api/keys", keysRoutes);
+app.use("/api/insights", insightsRoutes);
 
 app.get("/debug/sockets", (req, res) => {
     res.json(getUserSockets());
