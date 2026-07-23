@@ -242,6 +242,7 @@ router.post("/login", async (req, res) => {
                     email: user.email,
                     profile_picture_url: user.profile_picture,
                     is_private: user.is_private,
+                    timezone: user.timezone || "UTC",
                 },
             },
         });

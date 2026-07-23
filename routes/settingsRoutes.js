@@ -18,6 +18,29 @@ async function ensureBlockedTable() {
 }
 ensureBlockedTable().catch(console.error);
 
+async function ensureTimezoneColumn() {
+    const [rows] = await db.query(`
+        SELECT COUNT(*) AS cnt FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'timezone'
+    `);
+    if (rows[0].cnt === 0) {
+        await db.query(`ALTER TABLE users ADD COLUMN timezone VARCHAR(100) NOT NULL DEFAULT 'UTC'`);
+    }
+}
+ensureTimezoneColumn().catch(console.error);
+
+router.patch("/timezone", async (req, res) => {
+    try {
+        const userId = req.headers["x-current-user-id"];
+        const { timezone } = req.body;
+        if (!timezone) return res.status(400).json({ success: false, error: "timezone is required" });
+        await db.query("UPDATE users SET timezone = ? WHERE id = ?", [timezone, userId]);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 router.patch("/update-account-privacy", async (req, res) => {
   try {
     const currentUserId = req.headers["x-current-user-id"];
