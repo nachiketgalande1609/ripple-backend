@@ -403,6 +403,25 @@ router.get("/fetch-posts", async (req, res) => {
       return acc;
     }, {});
 
+    // Repost counts
+    const [repostCountsResult] = await db.query(
+      `SELECT post_id, COUNT(*) AS repost_count FROM reposts WHERE post_id IN (?) GROUP BY post_id`,
+      [postIds]
+    );
+    const repostCounts = repostCountsResult.reduce((acc, r) => {
+      acc[r.post_id] = r.repost_count;
+      return acc;
+    }, {});
+
+    let repostedSet = new Set();
+    if (userId) {
+      const [repostedByUser] = await db.query(
+        `SELECT post_id FROM reposts WHERE user_id = ? AND post_id IN (?)`,
+        [userId, postIds]
+      );
+      repostedSet = new Set(repostedByUser.map((r) => r.post_id));
+    }
+
     // Finalizing post objects
     const finalPosts = postsResult.map((post) => {
       return {
@@ -414,6 +433,8 @@ router.get("/fetch-posts", async (req, res) => {
         comments: commentsByPostId[post.id] || [],
         tagged_users: taggedByPostId[post.id] || [],
         media_files: mediaByPostId[post.id] || [],
+        repost_count: repostCounts[post.id] || 0,
+        is_reposted: repostedSet.has(post.id) ? 1 : 0,
       };
     });
 
@@ -823,6 +844,22 @@ router.get("/fetch-saved-posts", async (req, res) => {
       likedPostsResult.map((like) => like.post_id),
     );
 
+    // Fetch repost counts for all posts
+    const [repostCountsResult] = await db.query(
+      `SELECT post_id, COUNT(*) AS repost_count FROM reposts WHERE post_id IN (?) GROUP BY post_id`,
+      [postIds]
+    );
+    const repostCounts = repostCountsResult.reduce((acc, r) => {
+      acc[r.post_id] = r.repost_count;
+      return acc;
+    }, {});
+
+    // Fetch which posts current user has reposted
+    const [repostedByUser] = currentUserId
+      ? await db.query(`SELECT post_id FROM reposts WHERE user_id = ? AND post_id IN (?)`, [currentUserId, postIds])
+      : [[]];
+    const repostedSet = new Set(repostedByUser.map((r) => r.post_id));
+
     // Add like count and like status to posts
     result.forEach((post) => {
       const createdAt = new Date(post.created_at);
@@ -833,6 +870,10 @@ router.get("/fetch-saved-posts", async (req, res) => {
 
       // If currentUserId is provided, check if the current user liked the post
       post.liked_by_current_user = likedPostsByCurrentUser.has(post.id) ? 1 : 0;
+
+      // Repost data
+      post.repost_count = repostCounts[post.id] || 0;
+      post.is_reposted = repostedSet.has(post.id) ? 1 : 0;
     });
 
     // Fetch comments for each post
@@ -1338,6 +1379,113 @@ router.put("/update-tags/:postId", async (req, res) => {
     return res.json({ success: true, data: updated });
   } catch (err) {
     console.error("[update-tags] error:", err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── Repost routes ───────────────────────────────────────────
+
+// Ensure reposts table exists
+(async () => {
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS reposts (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        post_id INT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY unique_repost (user_id, post_id),
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
+      )
+    `);
+  } catch (err) {
+    console.error("Error creating reposts table:", err.message);
+  }
+})();
+
+// POST /repost/:postId — repost a post
+router.post("/repost/:postId", async (req, res) => {
+  const currentUserId = Number(req.headers["x-current-user-id"]);
+  const { postId } = req.params;
+
+  if (!currentUserId || !postId) {
+    return res.status(400).json({ success: false, error: "User ID and Post ID are required." });
+  }
+
+  try {
+    await db.query(
+      "INSERT IGNORE INTO reposts (user_id, post_id, created_at) VALUES (?, ?, CONVERT_TZ(NOW(), 'UTC', 'Asia/Kolkata'))",
+      [currentUserId, postId]
+    );
+    const [[{ repost_count }]] = await db.query(
+      "SELECT COUNT(*) AS repost_count FROM reposts WHERE post_id = ?",
+      [postId]
+    );
+    return res.status(200).json({ success: true, repost_count });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// DELETE /repost/:postId — undo repost
+router.delete("/repost/:postId", async (req, res) => {
+  const currentUserId = Number(req.headers["x-current-user-id"]);
+  const { postId } = req.params;
+
+  if (!currentUserId || !postId) {
+    return res.status(400).json({ success: false, error: "User ID and Post ID are required." });
+  }
+
+  try {
+    await db.query(
+      "DELETE FROM reposts WHERE user_id = ? AND post_id = ?",
+      [currentUserId, postId]
+    );
+    const [[{ repost_count }]] = await db.query(
+      "SELECT COUNT(*) AS repost_count FROM reposts WHERE post_id = ?",
+      [postId]
+    );
+    return res.status(200).json({ success: true, repost_count });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /reposts/user/:userId — get all posts reposted by a user
+router.get("/reposts/user/:userId", async (req, res) => {
+  const currentUserId = req.headers["x-current-user-id"];
+  const { userId } = req.params;
+
+  try {
+    const [rows] = await db.query(
+      `SELECT p.*, u.username, u.profile_picture,
+              r.created_at AS repost_created_at,
+              (SELECT COUNT(*) FROM reposts WHERE post_id = p.id) AS repost_count,
+              IF((SELECT COUNT(*) FROM reposts WHERE user_id = ? AND post_id = p.id) > 0, 1, 0) AS is_reposted,
+              (SELECT COUNT(*) FROM likes WHERE post_id = p.id) AS like_count,
+              IF((SELECT COUNT(*) FROM likes WHERE user_id = ? AND post_id = p.id) > 0, 1, 0) AS liked_by_current_user,
+              IF((SELECT COUNT(*) FROM saved_posts WHERE user_id = ? AND post_id = p.id) > 0, 1, 0) AS saved_by_current_user
+       FROM reposts r
+       JOIN posts p ON p.id = r.post_id
+       JOIN users u ON u.id = p.user_id
+       WHERE r.user_id = ?
+       ORDER BY r.created_at DESC`,
+      [currentUserId, currentUserId, currentUserId, userId]
+    );
+
+    const result = rows.map((row) => ({
+      ...row,
+      timeAgo: getTimeAgo(new Date(row.created_at)),
+      repost_timeAgo: getTimeAgo(new Date(row.repost_created_at)),
+      comments: [],
+      comment_count: 0,
+      tagged_users: [],
+      media_files: [],
+    }));
+
+    return res.status(200).json({ success: true, data: result });
+  } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
 });

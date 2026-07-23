@@ -20,7 +20,7 @@ router.get("/summary", async (req, res) => {
     if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
     try {
-        const [[postRow], [likesRow], [commentsRow], [savesRow], [followersRow], [followingRow], [topPosts], [storyRow], [postsByMonth], [viewsRow], [viewsByMonth]] = await Promise.all([
+        const [[postRow], [likesRow], [commentsRow], [savesRow], [followersRow], [followingRow], [topPosts], [storyRow], [postsByMonth], [viewsRow], [viewsByMonth], [repostsRow]] = await Promise.all([
             db.query("SELECT COUNT(*) AS total FROM posts WHERE user_id = ?", [userId]),
             db.query("SELECT COUNT(*) AS total FROM likes l JOIN posts p ON l.post_id = p.id WHERE p.user_id = ?", [userId]),
             db.query("SELECT COUNT(*) AS total FROM comments c JOIN posts p ON c.post_id = p.id WHERE p.user_id = ? AND c.user_id != ?", [userId, userId]),
@@ -72,6 +72,7 @@ router.get("/summary", async (req, res) => {
                 GROUP BY YEAR(viewed_at), MONTH(viewed_at), DATE_FORMAT(viewed_at, '%b')
                 ORDER BY year ASC, month_num ASC
             `, [userId]),
+            db.query("SELECT COUNT(*) AS total FROM reposts r JOIN posts p ON r.post_id = p.id WHERE p.user_id = ?", [userId]),
         ]);
 
         const totalPosts = postRow[0].total;
@@ -91,6 +92,7 @@ router.get("/summary", async (req, res) => {
             posts_by_month: postsByMonth,
             profile_views: viewsRow[0].total,
             profile_views_by_month: viewsByMonth,
+            total_reposts: repostsRow[0].total,
         });
     } catch (err) {
         console.error("Insights error:", err);
