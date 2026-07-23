@@ -1214,6 +1214,60 @@ async function fetchPostDetails(userId, postId, currentUserId, res) {
   }
 }
 
+// GET /reels?offset=0&limit=10 — fetch video posts for the Reels feed
+router.get("/reels", async (req, res) => {
+  const currentUserId = req.headers["x-current-user-id"];
+  const limit = Math.min(parseInt(req.query.limit) || 10, 50);
+  const offset = parseInt(req.query.offset) || 0;
+
+  try {
+    const reelsQuery = `
+      SELECT
+        p.*,
+        u.username,
+        u.profile_picture,
+        (SELECT COUNT(*) FROM likes WHERE post_id = p.id) AS like_count,
+        IF((SELECT COUNT(*) FROM likes WHERE user_id = ? AND post_id = p.id) > 0, 1, 0) AS liked_by_current_user,
+        (SELECT COUNT(*) FROM reposts WHERE post_id = p.id) AS repost_count,
+        IF((SELECT COUNT(*) FROM reposts WHERE user_id = ? AND post_id = p.id) > 0, 1, 0) AS is_reposted,
+        IF((SELECT COUNT(*) FROM saved_posts WHERE user_id = ? AND post_id = p.id) > 0, 1, 0) AS saved_by_current_user,
+        (SELECT COUNT(*) FROM comments WHERE post_id = p.id) AS comment_count
+      FROM posts p
+      JOIN users u ON p.user_id = u.id
+      WHERE p.file_url REGEXP '\\\\.(mp4|mov|webm|ogg)$'
+      ORDER BY p.created_at DESC
+      LIMIT ? OFFSET ?
+    `;
+
+    const [rows] = await db.query(reelsQuery, [
+      currentUserId,
+      currentUserId,
+      currentUserId,
+      limit,
+      offset,
+    ]);
+
+    const data = rows.map((row) => ({
+      ...row,
+      timeAgo: getTimeAgo(new Date(row.created_at)),
+    }));
+
+    return res.status(200).json({
+      success: true,
+      error: null,
+      data,
+      hasMore: data.length === limit,
+    });
+  } catch (err) {
+    console.error("Error fetching reels:", err);
+    return res.status(500).json({
+      success: false,
+      error: err.message,
+      data: null,
+    });
+  }
+});
+
 router.get("/:postId", async (req, res) => {
   const currentUserId = req.headers["x-current-user-id"];
   const { postId } = req.params;
