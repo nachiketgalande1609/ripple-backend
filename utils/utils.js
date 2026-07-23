@@ -1,9 +1,16 @@
 const { promisePool: db } = require("../db");
 const { getIo, getUserSockets } = require("../socket");
 
+const parseUtcDate = (val) => {
+  if (val instanceof Date) return val;
+  const s = String(val);
+  // MySQL DATETIME comes back without timezone info — treat as UTC
+  return new Date(/Z|[+-]\d{2}:\d{2}$/.test(s) ? s : s.replace(" ", "T") + "Z");
+};
+
 const getTimeAgo = (createdAt) => {
   const now = new Date();
-  const createdDate = new Date(createdAt);
+  const createdDate = parseUtcDate(createdAt);
 
   const diffInSeconds = Math.floor((now - createdDate) / 1000);
 

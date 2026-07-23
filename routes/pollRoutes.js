@@ -115,6 +115,7 @@ const buildPollResponse = async (poll, currentUserId) => {
 
     return {
         id: poll.id,
+        user_id: poll.user_id,
         question: poll.question,
         username: poll.username || null,
         profile_picture: poll.profile_picture || null,
@@ -170,6 +171,29 @@ router.get("/feed", async (req, res) => {
         return res.json({ success: true, data });
     } catch (err) {
         console.error("Poll feed error:", err);
+        return res.status(500).json({ success: false, error: "Internal server error." });
+    }
+});
+
+// ── DELETE /delete/:pollId ────────────────────────────────────────────────────
+router.delete("/delete/:pollId", async (req, res) => {
+    const { pollId } = req.params;
+    const userId = req.headers["x-current-user-id"];
+
+    try {
+        const [polls] = await db.query("SELECT user_id FROM polls WHERE id = ?", [pollId]);
+        if (polls.length === 0) return res.status(404).json({ success: false, error: "Poll not found." });
+        if (String(polls[0].user_id) !== String(userId)) {
+            return res.status(403).json({ success: false, error: "Not authorized." });
+        }
+
+        await db.query("DELETE FROM poll_votes WHERE poll_id = ?", [pollId]);
+        await db.query("DELETE FROM poll_options WHERE poll_id = ?", [pollId]);
+        await db.query("DELETE FROM polls WHERE id = ?", [pollId]);
+
+        return res.json({ success: true });
+    } catch (err) {
+        console.error("Delete poll error:", err);
         return res.status(500).json({ success: false, error: "Internal server error." });
     }
 });

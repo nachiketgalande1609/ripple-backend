@@ -17,6 +17,7 @@ const pool = mysql.createPool({
     queueLimit: 0,
     enableKeepAlive: true,
     keepAliveInitialDelay: 10000,
+    timezone: '+00:00',
     ssl: {
         ca: fs.readFileSync(path.join(__dirname, "ca.pem")),
     },
