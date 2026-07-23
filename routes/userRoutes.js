@@ -238,6 +238,37 @@ router.put("/profile/update-profile-details", async (req, res) => {
     }
 });
 
+// GET /api/users/suggestions
+router.get("/suggestions", async (req, res) => {
+    try {
+        const currentUserId = req.headers["x-current-user-id"];
+        if (!currentUserId) {
+            return res.status(400).json({ success: false, error: "Missing x-current-user-id header" });
+        }
+
+        const sql = `
+            SELECT u.id, u.username, u.profile_picture,
+                (SELECT COUNT(*) FROM followers WHERE following_id = u.id) AS follower_count,
+                (SELECT COUNT(*) FROM followers f2
+                 WHERE f2.following_id = u.id
+                 AND f2.follower_id IN (SELECT following_id FROM followers WHERE follower_id = ?)) AS mutual_count
+            FROM users u
+            WHERE u.id != ?
+              AND u.is_deactivated = 0
+              AND u.id NOT IN (SELECT following_id FROM followers WHERE follower_id = ?)
+              AND u.id NOT IN (SELECT following_id FROM follow_requests WHERE follower_id = ? AND status = 'pending')
+            ORDER BY mutual_count DESC, follower_count DESC
+            LIMIT 8
+        `;
+
+        const [rows] = await db.query(sql, [currentUserId, currentUserId, currentUserId, currentUserId]);
+        res.status(200).json({ success: true, data: rows });
+    } catch (err) {
+        console.error("Error fetching suggestions:", err.message);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 // POST /api/users/record-view/:profileUserId
 router.post("/record-view/:profileUserId", async (req, res) => {
     const { profileUserId } = req.params;
