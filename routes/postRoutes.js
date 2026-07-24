@@ -1085,6 +1085,7 @@ async function fetchPosts(userId, res, limit = 9, offset = 0) {
                 posts p
             WHERE
                 p.user_id = ?
+                AND (p.file_url IS NULL OR p.file_url NOT REGEXP '\\.(mp4|mov|webm|ogg)$')
             ORDER BY
                 p.created_at DESC
             LIMIT ? OFFSET ?;
@@ -1214,11 +1215,12 @@ async function fetchPostDetails(userId, postId, currentUserId, res) {
   }
 }
 
-// GET /reels?offset=0&limit=10 — fetch video posts for the Reels feed
+// GET /reels?offset=0&limit=10&userId=X — fetch video posts for the Reels feed
 router.get("/reels", async (req, res) => {
   const currentUserId = req.headers["x-current-user-id"];
   const limit = Math.min(parseInt(req.query.limit) || 10, 50);
   const offset = parseInt(req.query.offset) || 0;
+  const filterUserId = req.query.userId ? parseInt(req.query.userId) : null;
 
   try {
     const reelsQuery = `
@@ -1231,21 +1233,21 @@ router.get("/reels", async (req, res) => {
         (SELECT COUNT(*) FROM reposts WHERE post_id = p.id) AS repost_count,
         IF((SELECT COUNT(*) FROM reposts WHERE user_id = ? AND post_id = p.id) > 0, 1, 0) AS is_reposted,
         IF((SELECT COUNT(*) FROM saved_posts WHERE user_id = ? AND post_id = p.id) > 0, 1, 0) AS saved_by_current_user,
-        (SELECT COUNT(*) FROM comments WHERE post_id = p.id) AS comment_count
+        (SELECT COUNT(*) FROM comments WHERE post_id = p.id) AS comment_count,
+        (SELECT COUNT(*) FROM reel_views WHERE post_id = p.id) AS view_count
       FROM posts p
       JOIN users u ON p.user_id = u.id
       WHERE p.file_url REGEXP '\\\\.(mp4|mov|webm|ogg)$'
+      ${filterUserId ? "AND p.user_id = ?" : ""}
       ORDER BY p.created_at DESC
       LIMIT ? OFFSET ?
     `;
 
-    const [rows] = await db.query(reelsQuery, [
-      currentUserId,
-      currentUserId,
-      currentUserId,
-      limit,
-      offset,
-    ]);
+    const params = [currentUserId, currentUserId, currentUserId];
+    if (filterUserId) params.push(filterUserId);
+    params.push(limit, offset);
+
+    const [rows] = await db.query(reelsQuery, params);
 
     const data = rows.map((row) => ({
       ...row,
@@ -1438,6 +1440,38 @@ router.put("/update-tags/:postId", async (req, res) => {
 });
 
 // ── Repost routes ───────────────────────────────────────────
+
+// Ensure reel_views table exists
+(async () => {
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS reel_views (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        post_id INT NOT NULL,
+        viewer_id INT,
+        viewed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
+      )
+    `);
+  } catch (err) {
+    console.error("Error creating reel_views table:", err.message);
+  }
+})();
+
+// POST /reels/:postId/view — record a reel view
+router.post("/reels/:postId/view", async (req, res) => {
+  const currentUserId = req.headers["x-current-user-id"] || null;
+  const { postId } = req.params;
+  try {
+    await db.query(
+      `INSERT INTO reel_views (post_id, viewer_id) VALUES (?, ?)`,
+      [postId, currentUserId || null]
+    );
+    return res.status(200).json({ success: true });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
 
 // Ensure reposts table exists
 (async () => {
