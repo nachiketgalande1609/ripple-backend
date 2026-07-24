@@ -391,4 +391,39 @@ router.get("/:userId/following", async (req, res) => {
     }
 });
 
+// GET /:userId/mutual — users that both currentUser and userId follow
+router.get("/:userId/mutual", async (req, res) => {
+    const { userId } = req.params;
+    const currentUserId = req.headers["x-current-user-id"];
+    if (!currentUserId || currentUserId == userId) {
+        return res.status(200).json({ success: true, data: [] });
+    }
+    try {
+        // Followers of profileUser that currentUser also follows
+        const [rows] = await db.query(
+            `SELECT u.id, u.username, u.profile_picture
+             FROM followers f1
+             JOIN followers f2 ON f1.follower_id = f2.following_id
+             JOIN users u ON u.id = f1.follower_id
+             WHERE f1.following_id = ?
+               AND f2.follower_id = ?
+               AND f1.follower_id != ?
+             LIMIT 3`,
+            [userId, currentUserId, currentUserId]
+        );
+        const [countRow] = await db.query(
+            `SELECT COUNT(*) AS total
+             FROM followers f1
+             JOIN followers f2 ON f1.follower_id = f2.following_id
+             WHERE f1.following_id = ?
+               AND f2.follower_id = ?
+               AND f1.follower_id != ?`,
+            [userId, currentUserId, currentUserId]
+        );
+        res.status(200).json({ success: true, data: rows, total: countRow[0].total });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 module.exports = router;
