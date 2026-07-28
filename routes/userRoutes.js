@@ -22,7 +22,7 @@ router.get("/fetch-profile-details", async (req, res) => {
         const { userId } = req.query;
 
         // Fetch user profile
-        const userQuery = "SELECT id, username, email, bio, profile_picture, is_private, hide_activity, IF(hide_activity = 1, NULL, last_seen) AS last_seen FROM users WHERE id = ?";
+        const userQuery = "SELECT id, username, email, bio, profile_picture, website, is_private, hide_activity, IF(hide_activity = 1, NULL, last_seen) AS last_seen FROM users WHERE id = ?";
         const [userResults] = await db.query(userQuery, [userId]);
 
         if (userResults.length === 0) {
@@ -159,7 +159,7 @@ router.put("/profile/update-profile-details", async (req, res) => {
         });
     }
 
-    const { username, email, bio, profile_picture_url } = updatedProfile;
+    const { username, email, bio, profile_picture_url, website } = updatedProfile;
 
     const usernameRegex = /^[a-zA-Z0-9_]+$/;
     if (username && !usernameRegex.test(username)) {
@@ -192,6 +192,10 @@ router.put("/profile/update-profile-details", async (req, res) => {
             query += "profile_picture = ?, ";
             values.push(profile_picture_url);
         }
+        if (website !== undefined) {
+            query += "website = ?, ";
+            values.push(website);
+        }
 
         // Remove the trailing comma and space
         query = query.slice(0, -2);
@@ -211,7 +215,7 @@ router.put("/profile/update-profile-details", async (req, res) => {
         }
 
         // Fetch the updated user data
-        const [updatedUserResults] = await db.query("SELECT id, username, email, bio, profile_picture FROM users WHERE id = ?", [currentUserId]);
+        const [updatedUserResults] = await db.query("SELECT id, username, email, bio, profile_picture, website FROM users WHERE id = ?", [currentUserId]);
 
         const updatedUser = updatedUserResults[0];
 

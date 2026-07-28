@@ -8,6 +8,7 @@ CREATE TABLE `users` (
   `last_name` varchar(255) DEFAULT NULL,
   `profile_picture` varchar(255) DEFAULT NULL,
   `bio` text,
+  `website` varchar(500) DEFAULT NULL,
   `date_of_birth` date DEFAULT NULL,
   `gender` enum('male','female','other','prefer_not_to_say') DEFAULT NULL,
   `location` varchar(255) DEFAULT NULL,
