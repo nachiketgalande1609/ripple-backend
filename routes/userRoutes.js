@@ -16,13 +16,25 @@ const s3 = new S3Client({
     },
 });
 
+// Auto-add pronouns column if missing
+(async () => {
+    try {
+        const [cols] = await db.query(
+            "SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'pronouns'"
+        );
+        if (cols.length === 0) {
+            await db.query("ALTER TABLE users ADD COLUMN pronouns VARCHAR(50) DEFAULT NULL");
+        }
+    } catch (e) { console.error("pronouns column check failed:", e); }
+})();
+
 router.get("/fetch-profile-details", async (req, res) => {
     try {
         const currentUserId = req.headers["x-current-user-id"];
         const { userId } = req.query;
 
         // Fetch user profile
-        const userQuery = "SELECT id, username, email, bio, profile_picture, website, is_private, hide_activity, IF(hide_activity = 1, NULL, last_seen) AS last_seen FROM users WHERE id = ?";
+        const userQuery = "SELECT id, username, email, bio, profile_picture, website, pronouns, is_private, hide_activity, IF(hide_activity = 1, NULL, last_seen) AS last_seen FROM users WHERE id = ?";
         const [userResults] = await db.query(userQuery, [userId]);
 
         if (userResults.length === 0) {
@@ -159,7 +171,7 @@ router.put("/profile/update-profile-details", async (req, res) => {
         });
     }
 
-    const { username, email, bio, profile_picture_url, website } = updatedProfile;
+    const { username, email, bio, profile_picture_url, website, pronouns } = updatedProfile;
 
     const usernameRegex = /^[a-zA-Z0-9_]+$/;
     if (username && !usernameRegex.test(username)) {
@@ -195,6 +207,10 @@ router.put("/profile/update-profile-details", async (req, res) => {
         if (website !== undefined) {
             query += "website = ?, ";
             values.push(website);
+        }
+        if (pronouns !== undefined) {
+            query += "pronouns = ?, ";
+            values.push(pronouns || null);
         }
 
         // Remove the trailing comma and space

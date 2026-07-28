@@ -219,4 +219,27 @@ router.post("/upload-story", upload.single("media"), async (req, res) => {
     }
 });
 
+router.post("/share-post-as-story", async (req, res) => {
+    try {
+        const currentUserId = req.headers["x-current-user-id"];
+        const { post_id, caption } = req.body;
+        if (!currentUserId || !post_id) {
+            return res.status(400).json({ success: false, error: "Missing required fields" });
+        }
+        const [[post]] = await db.query("SELECT file_url FROM posts WHERE id = ? LIMIT 1", [post_id]);
+        if (!post || !post.file_url) {
+            return res.status(404).json({ success: false, error: "Post media not found" });
+        }
+        const mediaType = /\.(mp4|mov|webm|ogg)$/i.test(post.file_url) ? "video" : "image";
+        const [result] = await db.query(
+            "INSERT INTO stories (caption, media_url, media_type, user_id) VALUES (?, ?, ?, ?)",
+            [caption || null, post.file_url, mediaType, currentUserId]
+        );
+        return res.status(201).json({ success: true, storyId: result.insertId });
+    } catch (error) {
+        console.error("Share post as story error:", error);
+        return res.status(500).json({ success: false, error: "Failed to share post as story." });
+    }
+});
+
 module.exports = router;
