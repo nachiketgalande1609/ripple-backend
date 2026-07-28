@@ -64,6 +64,27 @@ router.patch("/update-account-privacy", async (req, res) => {
   }
 });
 
+router.patch("/update-activity-status", async (req, res) => {
+    try {
+        const userId = req.headers["x-current-user-id"];
+        const { hideActivity } = req.body;
+        await db.query("UPDATE users SET hide_activity = ? WHERE id = ?", [hideActivity ? 1 : 0, userId]);
+        return res.status(200).json({ success: true, error: null });
+    } catch (error) {
+        return res.status(500).json({ success: false, error: error.message, data: null });
+    }
+});
+
+router.get("/activity-status", async (req, res) => {
+    try {
+        const userId = req.headers["x-current-user-id"];
+        const [[user]] = await db.query("SELECT hide_activity FROM users WHERE id = ?", [userId]);
+        return res.status(200).json({ success: true, data: { hideActivity: !!user?.hide_activity } });
+    } catch (error) {
+        return res.status(500).json({ success: false, error: error.message, data: null });
+    }
+});
+
 router.post("/block/:userId", async (req, res) => {
     try {
         const blockerId = req.headers["x-current-user-id"];

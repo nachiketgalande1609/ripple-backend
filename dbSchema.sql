@@ -17,6 +17,8 @@ CREATE TABLE `users` (
   `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `last_login` timestamp NULL DEFAULT NULL,
+  `last_seen` timestamp NULL DEFAULT NULL,
+  `hide_activity` tinyint(1) DEFAULT '0',
   `is_private` tinyint(1) DEFAULT '0',
   `verification_token` text,
   `token_expiry` datetime DEFAULT NULL,

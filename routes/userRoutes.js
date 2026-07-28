@@ -22,7 +22,7 @@ router.get("/fetch-profile-details", async (req, res) => {
         const { userId } = req.query;
 
         // Fetch user profile
-        const userQuery = "SELECT id, username, email, bio, profile_picture, is_private FROM users WHERE id = ?";
+        const userQuery = "SELECT id, username, email, bio, profile_picture, is_private, hide_activity, IF(hide_activity = 1, NULL, last_seen) AS last_seen FROM users WHERE id = ?";
         const [userResults] = await db.query(userQuery, [userId]);
 
         if (userResults.length === 0) {

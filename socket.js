@@ -2,6 +2,12 @@ const { Server } = require("socket.io");
 
 let io;
 let userSockets = {};
+let hiddenUsers = new Set(); // userIds with hide_activity=1
+
+async function getVisibleOnlineUsers(db) {
+  const ids = Object.keys(userSockets).filter((id) => !hiddenUsers.has(id));
+  return ids;
+}
 
 function initializeSocket(server, db) {
   io = new Server(server, {
@@ -18,10 +24,23 @@ function initializeSocket(server, db) {
       if (userSockets[userId] !== socket.id) {
         userSockets[userId] = socket.id;
 
-        const onlineUsers = Object.keys(userSockets);
+        try {
+          const [[user]] = await db.query("SELECT hide_activity FROM users WHERE id = ?", [userId]);
+          if (user?.hide_activity) hiddenUsers.add(String(userId));
+          else hiddenUsers.delete(String(userId));
+        } catch (err) {
+          console.error("Error checking hide_activity:", err.message);
+        }
+
+        const onlineUsers = await getVisibleOnlineUsers(db);
         io.emit("onlineUsers", onlineUsers);
 
         try {
+          await db.query(
+            `UPDATE users SET last_seen = CONVERT_TZ(NOW(), 'UTC', 'Asia/Kolkata') WHERE id = ?`,
+            [userId],
+          );
+
           await db.query(
             `UPDATE messages SET delivered = TRUE, delivered_timestamp = CONVERT_TZ(NOW(), 'UTC', 'Asia/Kolkata') WHERE receiver_id = ? AND delivered = FALSE`,
             [userId],
@@ -345,12 +364,21 @@ function initializeSocket(server, db) {
       }
     });
 
-    socket.on("disconnect", () => {
+    socket.on("disconnect", async () => {
       for (let userId in userSockets) {
         if (userSockets[userId] === socket.id) {
           delete userSockets[userId];
-          const onlineUsers = Object.keys(userSockets);
-          io.emit("onlineUsers", onlineUsers); // broadcast to everyone, not just disconnected socket
+          hiddenUsers.delete(String(userId));
+          const onlineUsers = await getVisibleOnlineUsers(db);
+          io.emit("onlineUsers", onlineUsers);
+          try {
+            await db.query(
+              `UPDATE users SET last_seen = CONVERT_TZ(NOW(), 'UTC', 'Asia/Kolkata') WHERE id = ?`,
+              [userId],
+            );
+          } catch (err) {
+            console.error("Error updating last_seen on disconnect:", err.message);
+          }
           break;
         }
       }

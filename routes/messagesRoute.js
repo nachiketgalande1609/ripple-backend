@@ -29,11 +29,12 @@ router.get("/fetch-users", async (req, res) => {
 
     try {
         const query = `
-            SELECT DISTINCT 
-                u.id, 
-                u.username, 
-                u.profile_picture, 
+            SELECT DISTINCT
+                u.id,
+                u.username,
+                u.profile_picture,
                 u.public_key,
+                IF(u.hide_activity = 1, NULL, u.last_seen) AS last_seen,
 
                 -- Latest message exchanged with the user
                 (
