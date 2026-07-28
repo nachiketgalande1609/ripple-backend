@@ -12,6 +12,20 @@ const sharp = require("sharp");
 
 const { promisePool: db } = require("../db");
 
+// Ensure is_pinned column exists
+(async () => {
+  try {
+    const [cols] = await db.query(
+      "SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'posts' AND COLUMN_NAME = 'is_pinned'"
+    );
+    if (cols.length === 0) {
+      await db.query("ALTER TABLE posts ADD COLUMN is_pinned TINYINT(1) DEFAULT 0");
+    }
+  } catch (e) {
+    console.error("Could not ensure is_pinned column:", e.message);
+  }
+})();
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 100 * 1024 * 1024 }, // 100MB
@@ -1267,6 +1281,60 @@ router.get("/reels", async (req, res) => {
       error: err.message,
       data: null,
     });
+  }
+});
+
+// GET pinned posts for a user profile
+router.get("/pinned/:userId", async (req, res) => {
+  const { userId } = req.params;
+  try {
+    const [posts] = await db.query(
+      `SELECT id, file_url FROM posts
+       WHERE user_id = ? AND is_pinned = 1
+         AND (file_url IS NULL OR file_url NOT REGEXP '\\.(mp4|mov|webm|ogg)$')
+       ORDER BY updated_at DESC`,
+      [userId]
+    );
+    res.json({ success: true, data: posts });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// PIN a post
+router.put("/pin/:postId", async (req, res) => {
+  const currentUserId = req.headers["x-current-user-id"];
+  const { postId } = req.params;
+  if (!currentUserId) return res.status(401).json({ success: false, error: "Unauthorized" });
+  try {
+    const [rows] = await db.query("SELECT user_id FROM posts WHERE id = ?", [postId]);
+    if (!rows.length || String(rows[0].user_id) !== String(currentUserId)) {
+      return res.status(403).json({ success: false, error: "Forbidden" });
+    }
+    const [[{ count }]] = await db.query(
+      "SELECT COUNT(*) AS count FROM posts WHERE user_id = ? AND is_pinned = 1",
+      [currentUserId]
+    );
+    if (count >= 3) {
+      return res.status(400).json({ success: false, error: "max_pins_reached" });
+    }
+    await db.query("UPDATE posts SET is_pinned = 1 WHERE id = ?", [postId]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// UNPIN a post
+router.put("/unpin/:postId", async (req, res) => {
+  const currentUserId = req.headers["x-current-user-id"];
+  const { postId } = req.params;
+  if (!currentUserId) return res.status(401).json({ success: false, error: "Unauthorized" });
+  try {
+    await db.query("UPDATE posts SET is_pinned = 0 WHERE id = ? AND user_id = ?", [postId, currentUserId]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
