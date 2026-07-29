@@ -40,6 +40,20 @@ const { promisePool: db } = require("../db");
   }
 })();
 
+// Ensure scheduled_at column exists
+(async () => {
+  try {
+    const [cols] = await db.query(
+      "SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'posts' AND COLUMN_NAME = 'scheduled_at'"
+    );
+    if (cols.length === 0) {
+      await db.query("ALTER TABLE posts ADD COLUMN scheduled_at DATETIME DEFAULT NULL");
+    }
+  } catch (e) {
+    console.error("Could not ensure scheduled_at column:", e.message);
+  }
+})();
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 100 * 1024 * 1024 }, // 100MB
@@ -339,6 +353,7 @@ router.get("/fetch-posts", async (req, res) => {
                    OR (b.blocker_id = p.user_id AND b.blocked_id = ?)
             )
             AND (p.is_archived = 0 OR p.is_archived IS NULL)
+            AND (p.scheduled_at IS NULL OR p.scheduled_at <= NOW())
             ORDER BY p.created_at DESC
             LIMIT ? OFFSET ?;
         `;
@@ -591,7 +606,7 @@ router.get("/fetch-post-details", async (req, res) => {
 
 // Create Post
 router.post("/create-post", upload.array("images", 10), async (req, res) => {
-  const { content, location, user_id } = req.body;
+  const { content, location, user_id, scheduled_at } = req.body;
   const files = req.files;
 
   if (!content || !files || files.length === 0) {
@@ -639,9 +654,11 @@ router.post("/create-post", upload.array("images", 10), async (req, res) => {
 
     const firstFile = uploaded[0];
 
+    const scheduledAt = scheduled_at ? new Date(scheduled_at) : null;
+
     const insertQuery = `
-            INSERT INTO posts (content, file_url, location, user_id, media_width, media_height)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO posts (content, file_url, location, user_id, media_width, media_height, scheduled_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
         `;
 
     const [result] = await db.query(insertQuery, [
@@ -651,6 +668,7 @@ router.post("/create-post", upload.array("images", 10), async (req, res) => {
       user_id,
       firstFile.mediaWidth,
       firstFile.mediaHeight,
+      scheduledAt,
     ]);
 
     const postId = result.insertId;
@@ -1116,6 +1134,7 @@ async function fetchPosts(userId, res, limit = 9, offset = 0) {
                 p.user_id = ?
                 AND (p.file_url IS NULL OR p.file_url NOT REGEXP '\\.(mp4|mov|webm|ogg)$')
                 AND (p.is_archived = 0 OR p.is_archived IS NULL)
+                AND (p.scheduled_at IS NULL OR p.scheduled_at <= NOW())
             ORDER BY
                 p.created_at DESC
             LIMIT ? OFFSET ?;
@@ -1379,6 +1398,24 @@ router.put("/unpin/:postId", async (req, res) => {
   try {
     await db.query("UPDATE posts SET is_pinned = 0 WHERE id = ? AND user_id = ?", [postId, currentUserId]);
     res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET scheduled posts for current user
+router.get("/scheduled", async (req, res) => {
+  const currentUserId = req.headers["x-current-user-id"];
+  if (!currentUserId) return res.status(401).json({ success: false, error: "Unauthorized" });
+  try {
+    const [rows] = await db.query(
+      `SELECT p.id, p.file_url, p.content, p.scheduled_at, p.media_width, p.media_height
+       FROM posts p
+       WHERE p.user_id = ? AND p.scheduled_at > NOW()
+       ORDER BY p.scheduled_at ASC`,
+      [currentUserId]
+    );
+    res.json({ success: true, data: rows });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
