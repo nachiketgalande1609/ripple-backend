@@ -200,6 +200,29 @@ router.post("/submit-post-comment", async (req, res) => {
       emitUnreadNotificationCount(postAuthorId);
     }
 
+    // @mention notifications
+    const mentionHandles = [...new Set((comment.match(/@([a-zA-Z0-9_.]+)/g) || []).map(m => m.slice(1)))];
+    if (mentionHandles.length > 0) {
+      const placeholders = mentionHandles.map(() => "?").join(",");
+      const [mentionedUsers] = await db.query(
+        `SELECT id FROM users WHERE username IN (${placeholders})`,
+        mentionHandles
+      );
+      // Skip the commenter and anyone already notified above
+      const skip = new Set([String(currentUserId), String(postAuthorId)]);
+      if (parentCommentId) {
+        const [pr] = await db.query("SELECT user_id FROM comments WHERE id = ?", [parentCommentId]);
+        if (pr[0]?.user_id) skip.add(String(pr[0].user_id));
+      }
+      const preview = comment.length > 60 ? comment.slice(0, 60) + "…" : comment;
+      for (const u of mentionedUsers) {
+        if (!skip.has(String(u.id))) {
+          await createNotification(u.id, currentUserId, "mention", `mentioned you in a comment: "${preview}"`, postId, commentId);
+          emitUnreadNotificationCount(u.id);
+        }
+      }
+    }
+
     return res.status(201).json({
       success: true,
       message: "Comment added and notification sent successfully.",

@@ -403,4 +403,19 @@ router.delete("/cancel-premium", async (req, res) => {
     }
 });
 
+// GET /api/users/by-username/:username  (used for @mention navigation)
+router.get("/by-username/:username", async (req, res) => {
+    const { username } = req.params;
+    try {
+        const [[user]] = await db.query(
+            "SELECT id, username, profile_picture FROM users WHERE username = ? LIMIT 1",
+            [username]
+        );
+        if (!user) return res.status(404).json({ success: false, data: null });
+        res.json({ success: true, data: user });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 module.exports = router;
