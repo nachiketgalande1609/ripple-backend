@@ -42,7 +42,7 @@ router.get("/:userId", async (req, res) => {
 
         const highlightIds = highlights.map(h => h.id);
         const [items] = await db.query(
-            "SELECT id, highlight_id, media_url, media_type, order_index FROM highlight_items WHERE highlight_id IN (?) ORDER BY order_index ASC, created_at ASC",
+            "SELECT id, highlight_id, media_url, media_type, order_index, created_at FROM highlight_items WHERE highlight_id IN (?) ORDER BY order_index ASC, created_at ASC",
             [highlightIds]
         );
 

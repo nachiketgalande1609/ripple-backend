@@ -26,6 +26,20 @@ const { promisePool: db } = require("../db");
   }
 })();
 
+// Ensure is_archived column exists
+(async () => {
+  try {
+    const [cols] = await db.query(
+      "SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'posts' AND COLUMN_NAME = 'is_archived'"
+    );
+    if (cols.length === 0) {
+      await db.query("ALTER TABLE posts ADD COLUMN is_archived TINYINT(1) DEFAULT 0");
+    }
+  } catch (e) {
+    console.error("Could not ensure is_archived column:", e.message);
+  }
+})();
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 100 * 1024 * 1024 }, // 100MB
@@ -324,6 +338,7 @@ router.get("/fetch-posts", async (req, res) => {
                 WHERE (b.blocker_id = ? AND b.blocked_id = p.user_id)
                    OR (b.blocker_id = p.user_id AND b.blocked_id = ?)
             )
+            AND (p.is_archived = 0 OR p.is_archived IS NULL)
             ORDER BY p.created_at DESC
             LIMIT ? OFFSET ?;
         `;
@@ -1100,6 +1115,7 @@ async function fetchPosts(userId, res, limit = 9, offset = 0) {
             WHERE
                 p.user_id = ?
                 AND (p.file_url IS NULL OR p.file_url NOT REGEXP '\\.(mp4|mov|webm|ogg)$')
+                AND (p.is_archived = 0 OR p.is_archived IS NULL)
             ORDER BY
                 p.created_at DESC
             LIMIT ? OFFSET ?;
@@ -1301,6 +1317,36 @@ router.get("/pinned/:userId", async (req, res) => {
   }
 });
 
+// ARCHIVE a post
+router.put("/archive/:postId", async (req, res) => {
+  const currentUserId = req.headers["x-current-user-id"];
+  const { postId } = req.params;
+  if (!currentUserId) return res.status(401).json({ success: false, error: "Unauthorized" });
+  try {
+    const [rows] = await db.query("SELECT user_id FROM posts WHERE id = ?", [postId]);
+    if (!rows.length || String(rows[0].user_id) !== String(currentUserId)) {
+      return res.status(403).json({ success: false, error: "Forbidden" });
+    }
+    await db.query("UPDATE posts SET is_archived = 1, is_pinned = 0 WHERE id = ?", [postId]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// UNARCHIVE a post
+router.put("/unarchive/:postId", async (req, res) => {
+  const currentUserId = req.headers["x-current-user-id"];
+  const { postId } = req.params;
+  if (!currentUserId) return res.status(401).json({ success: false, error: "Unauthorized" });
+  try {
+    await db.query("UPDATE posts SET is_archived = 0 WHERE id = ? AND user_id = ?", [postId, currentUserId]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // PIN a post
 router.put("/pin/:postId", async (req, res) => {
   const currentUserId = req.headers["x-current-user-id"];
@@ -1333,6 +1379,21 @@ router.put("/unpin/:postId", async (req, res) => {
   try {
     await db.query("UPDATE posts SET is_pinned = 0 WHERE id = ? AND user_id = ?", [postId, currentUserId]);
     res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET archived posts for current user
+router.get("/archived", async (req, res) => {
+  const currentUserId = req.headers["x-current-user-id"];
+  if (!currentUserId) return res.status(401).json({ success: false, error: "Unauthorized" });
+  try {
+    const [rows] = await db.query(
+      "SELECT id, file_url, content, created_at FROM posts WHERE user_id = ? AND is_archived = 1 ORDER BY created_at DESC",
+      [currentUserId]
+    );
+    res.json({ success: true, data: rows });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }

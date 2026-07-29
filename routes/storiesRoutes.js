@@ -136,6 +136,19 @@ router.get("/my-archive", async (req, res) => {
     }
 });
 
+router.delete("/:storyId", async (req, res) => {
+    try {
+        const currentUserId = req.headers["x-current-user-id"];
+        const { storyId } = req.params;
+        if (!currentUserId) return res.status(401).json({ success: false, error: "Unauthorized" });
+        await db.query("DELETE FROM stories WHERE id = ? AND user_id = ?", [storyId, currentUserId]);
+        return res.json({ success: true });
+    } catch (err) {
+        console.error(err);
+        return res.status(500).json({ success: false, error: "Failed to delete story" });
+    }
+});
+
 router.post("/upload-story", upload.single("media"), async (req, res) => {
     try {
         const { caption, user_id } = req.body;
