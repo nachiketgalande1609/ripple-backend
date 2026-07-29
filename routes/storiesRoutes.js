@@ -118,6 +118,24 @@ router.get("/fetch-user-stories", async (req, res) => {
     }
 });
 
+// GET /api/stories/my-archive — all stories the current user ever posted
+router.get("/my-archive", async (req, res) => {
+    try {
+        const currentUserId = req.headers["x-current-user-id"];
+        if (!currentUserId) return res.status(400).json({ success: false, error: "User ID required" });
+        const [rows] = await db.query(
+            `SELECT id, media_url, media_type, caption, created_at
+             FROM stories WHERE user_id = ?
+             ORDER BY created_at DESC`,
+            [currentUserId]
+        );
+        return res.json({ success: true, data: rows });
+    } catch (err) {
+        console.error(err);
+        return res.status(500).json({ success: false, error: "Failed to fetch archive" });
+    }
+});
+
 router.post("/upload-story", upload.single("media"), async (req, res) => {
     try {
         const { caption, user_id } = req.body;

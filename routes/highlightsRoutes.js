@@ -88,27 +88,38 @@ router.post("/", async (req, res) => {
     }
 });
 
-// PUT /api/highlights/:id — update title/cover
+// PUT /api/highlights/:id — update title/cover and optionally replace all items
 router.put("/:id", async (req, res) => {
     try {
         const currentUserId = req.headers["x-current-user-id"];
         const { id } = req.params;
-        const { title, cover_url } = req.body;
+        const { title, cover_url, items } = req.body;
         if (!currentUserId) return res.status(401).json({ success: false, error: "Unauthorized" });
 
         let query = "UPDATE story_highlights SET ";
         const values = [];
         if (title) { query += "title = ?, "; values.push(title.trim()); }
         if (cover_url !== undefined) { query += "cover_url = ?, "; values.push(cover_url || null); }
-        if (values.length === 0) return res.status(400).json({ success: false, error: "Nothing to update" });
 
-        query = query.slice(0, -2) + " WHERE id = ? AND user_id = ?";
-        values.push(id, currentUserId);
-        await db.query(query, values);
-        res.json({ success: true });
+        if (values.length > 0) {
+            query = query.slice(0, -2) + " WHERE id = ? AND user_id = ?";
+            values.push(id, currentUserId);
+            await db.query(query, values);
+        }
+
+        // Replace all items if provided
+        if (Array.isArray(items)) {
+            await db.query("DELETE FROM highlight_items WHERE highlight_id = ?", [id]);
+            if (items.length > 0) {
+                const rows = items.map((item, i) => [id, item.media_url, item.media_type || "image", i]);
+                await db.query("INSERT INTO highlight_items (highlight_id, media_url, media_type, order_index) VALUES ?", [rows]);
+            }
+        }
+
+        return res.json({ success: true });
     } catch (e) {
         console.error(e);
-        res.status(500).json({ success: false, error: "Failed to update highlight" });
+        return res.status(500).json({ success: false, error: "Failed to update highlight" });
     }
 });
 
