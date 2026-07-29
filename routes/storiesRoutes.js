@@ -84,8 +84,10 @@ router.get("/fetch-user-stories", async (req, res) => {
                     viewers = story.viewers;
                 }
 
-                // remove null viewers (when no views exist)
-                viewers = viewers.filter((v) => v.viewer_id !== null);
+                // remove null viewers (when no views exist), owner views, and duplicates
+                viewers = viewers.filter((v) => v.viewer_id !== null && v.viewer_id !== story.user_id);
+                const seen = new Set();
+                viewers = viewers.filter((v) => { if (seen.has(v.viewer_id)) return false; seen.add(v.viewer_id); return true; });
             }
 
             return {
@@ -115,6 +117,49 @@ router.get("/fetch-user-stories", async (req, res) => {
             error: "Failed to fetch stories.",
             data: null,
         });
+    }
+});
+
+// GET /api/stories/user/:userId — active stories for a specific user profile
+router.get("/user/:userId", async (req, res) => {
+    try {
+        const currentUserId = parseInt(req.headers["x-current-user-id"], 10);
+        const targetUserId = parseInt(req.params.userId, 10);
+        if (isNaN(targetUserId)) return res.status(400).json({ success: false, error: "Invalid user ID" });
+
+        const [rows] = await db.query(
+            `SELECT s.id AS story_id, s.caption, s.media_url, s.media_type, s.created_at,
+                u.id AS user_id, u.username, u.profile_picture,
+                JSON_ARRAYAGG(JSON_OBJECT(
+                    'viewer_id', v.user_id,
+                    'viewer_username', viewer.username,
+                    'viewer_profile_picture', viewer.profile_picture,
+                    'viewed_at', v.viewed_at
+                )) AS viewers
+            FROM stories s
+            JOIN users u ON s.user_id = u.id
+            LEFT JOIN story_views v ON s.id = v.story_id
+            LEFT JOIN users viewer ON v.user_id = viewer.id
+            WHERE s.user_id = ? AND s.is_active = 1
+              AND (s.expires_at IS NULL OR s.expires_at > CONVERT_TZ(NOW(), 'UTC', 'Asia/Kolkata'))
+            GROUP BY s.id, u.id
+            ORDER BY s.created_at ASC`,
+            [targetUserId]
+        );
+
+        const stories = rows.map(s => {
+            let viewers = [];
+            try { viewers = typeof s.viewers === "string" ? JSON.parse(s.viewers) : s.viewers; } catch {}
+            viewers = (viewers || []).filter(v => v.viewer_id !== null && v.viewer_id !== targetUserId);
+            const seen = new Set();
+            viewers = viewers.filter(v => { if (seen.has(v.viewer_id)) return false; seen.add(v.viewer_id); return true; });
+            return { ...s, viewers };
+        });
+
+        res.json({ success: true, data: stories });
+    } catch (err) {
+        console.error("Error fetching user stories:", err.message);
+        res.status(500).json({ success: false, error: "Server error" });
     }
 });
 
