@@ -47,17 +47,6 @@ router.get("/fetch-users", async (req, res) => {
                     LIMIT 1
                 ) AS latest_message,
 
-                -- Encrypted keys for the latest message (null if legacy plaintext)
-                (
-                    SELECT m1.encrypted_keys
-                    FROM messages m1
-                    WHERE
-                        (m1.sender_id = u.id AND m1.receiver_id = ?) OR
-                        (m1.receiver_id = u.id AND m1.sender_id = ?)
-                    ORDER BY m1.timestamp DESC
-                    LIMIT 1
-                ) AS latest_message_encrypted_keys,
-
                 -- Timestamp of the latest message
                 (
                     SELECT m2.timestamp
@@ -89,7 +78,6 @@ router.get("/fetch-users", async (req, res) => {
 
         const [usersResults] = await db.query(query, [
             currentUserId, currentUserId, // latest_message
-            currentUserId, currentUserId, // latest_message_encrypted_keys
             currentUserId, currentUserId, // latest_message_timestamp
             currentUserId,                // unread_count
             currentUserId, currentUserId, // JOIN WHERE
@@ -128,7 +116,6 @@ router.get("/fetch-messages", async (req, res) => {
     const query = `
         SELECT
             m.message_id, m.sender_id, m.receiver_id, m.message_text,
-            m.encrypted_keys,
             m.file_url, m.timestamp, m.delivered, m.delivered_timestamp,
             m.is_read, m.read_timestamp, m.file_name, m.file_size,
             m.reply_to, m.media_width, m.media_height, m.reactions, m.post_id,
@@ -220,7 +207,6 @@ router.get("/fetch-messages", async (req, res) => {
                 sender_id: msg.sender_id,
                 receiver_id: msg.receiver_id,
                 message_text: msg.message_text,
-                encrypted_keys: msg.encrypted_keys ?? null,
                 file_url: msg.file_url,
                 timestamp: msg.timestamp,
                 delivered: msg.delivered,
