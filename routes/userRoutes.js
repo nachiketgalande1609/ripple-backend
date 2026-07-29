@@ -28,13 +28,42 @@ const s3 = new S3Client({
     } catch (e) { console.error("pronouns column check failed:", e); }
 })();
 
+// Ensure profile_views table exists
+(async () => {
+    try {
+        await db.query(`
+            CREATE TABLE IF NOT EXISTS profile_views (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                profile_user_id INT NOT NULL,
+                viewer_id INT NOT NULL,
+                viewed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_profile (profile_user_id),
+                INDEX idx_viewer (viewer_id)
+            )
+        `);
+    } catch (e) { console.error("profile_views table check failed:", e); }
+})();
+
+// Auto-add premium columns if missing
+(async () => {
+    try {
+        const [cols] = await db.query(
+            "SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'is_premium'"
+        );
+        if (cols.length === 0) {
+            await db.query("ALTER TABLE users ADD COLUMN is_premium TINYINT(1) NOT NULL DEFAULT 0");
+            await db.query("ALTER TABLE users ADD COLUMN premium_expires_at DATETIME DEFAULT NULL");
+        }
+    } catch (e) { console.error("premium columns check failed:", e); }
+})();
+
 router.get("/fetch-profile-details", async (req, res) => {
     try {
         const currentUserId = req.headers["x-current-user-id"];
         const { userId } = req.query;
 
         // Fetch user profile
-        const userQuery = "SELECT id, username, email, bio, profile_picture, website, pronouns, is_private, hide_activity, IF(hide_activity = 1, NULL, last_seen) AS last_seen FROM users WHERE id = ?";
+        const userQuery = "SELECT id, username, email, bio, profile_picture, website, pronouns, is_private, hide_activity, is_premium, premium_expires_at, IF(hide_activity = 1, NULL, last_seen) AS last_seen FROM users WHERE id = ?";
         const [userResults] = await db.query(userQuery, [userId]);
 
         if (userResults.length === 0) {
@@ -302,6 +331,75 @@ router.post("/record-view/:profileUserId", async (req, res) => {
         res.json({ ok: true });
     } catch {
         res.json({ ok: false });
+    }
+});
+
+// GET /api/users/profile-views  (premium-gated)
+router.get("/profile-views", async (req, res) => {
+    const currentUserId = req.headers["x-current-user-id"];
+    if (!currentUserId) return res.status(401).json({ success: false, error: "Unauthorized" });
+    try {
+        const [[user]] = await db.query(
+            "SELECT is_premium, premium_expires_at FROM users WHERE id = ?", [currentUserId]
+        );
+        const active = user?.is_premium === 1 &&
+            (!user.premium_expires_at || new Date(user.premium_expires_at) > new Date());
+        if (!active) return res.status(403).json({ success: false, error: "premium_required" });
+
+        const [rows] = await db.query(
+            `SELECT pv.id, pv.viewer_id,
+                    pv.viewed_at,
+                    u.username, u.profile_picture
+             FROM profile_views pv
+             JOIN users u ON u.id = pv.viewer_id
+             WHERE pv.profile_user_id = ?
+             ORDER BY pv.id DESC
+             LIMIT 200`,
+            [currentUserId]
+        );
+        // Deduplicate: keep most-recent view per viewer
+        const seen = new Set();
+        const unique = rows.filter(r => {
+            if (seen.has(r.viewer_id)) return false;
+            seen.add(r.viewer_id);
+            return true;
+        });
+        res.json({ success: true, data: unique, total: rows.length });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// POST /api/users/grant-premium  (stub — payment integration plugs in here)
+router.post("/grant-premium", async (req, res) => {
+    const currentUserId = req.headers["x-current-user-id"];
+    if (!currentUserId) return res.status(401).json({ success: false, error: "Unauthorized" });
+    try {
+        const { duration_months = 1 } = req.body;
+        const expiresAt = new Date();
+        expiresAt.setMonth(expiresAt.getMonth() + Number(duration_months));
+        await db.query(
+            "UPDATE users SET is_premium = 1, premium_expires_at = ? WHERE id = ?",
+            [expiresAt, currentUserId]
+        );
+        res.json({ success: true, expires_at: expiresAt });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// DELETE /api/users/cancel-premium
+router.delete("/cancel-premium", async (req, res) => {
+    const currentUserId = req.headers["x-current-user-id"];
+    if (!currentUserId) return res.status(401).json({ success: false, error: "Unauthorized" });
+    try {
+        await db.query(
+            "UPDATE users SET is_premium = 0, premium_expires_at = NULL WHERE id = ?",
+            [currentUserId]
+        );
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
     }
 });
 
