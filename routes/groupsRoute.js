@@ -5,7 +5,7 @@ const { promisePool: db } = require("../db");
 // POST /api/groups/create
 router.post("/create", async (req, res) => {
   const currentUserId = req.headers["x-current-user-id"];
-  const { name, description, memberIds } = req.body;
+  const { name, memberIds } = req.body;
 
   if (!name || !name.trim()) {
     return res.status(400).json({ success: false, error: "Group name is required", data: null });
@@ -13,13 +13,12 @@ router.post("/create", async (req, res) => {
 
   try {
     const [result] = await db.query(
-      `INSERT INTO \`groups\` (name, description, created_by, created_at)
-       VALUES (?, ?, ?, CONVERT_TZ(NOW(), 'UTC', 'Asia/Kolkata'))`,
-      [name.trim(), description?.trim() || null, currentUserId]
+      `INSERT INTO \`groups\` (name, created_by, created_at)
+       VALUES (?, ?, CONVERT_TZ(NOW(), 'UTC', 'Asia/Kolkata'))`,
+      [name.trim(), currentUserId]
     );
     const groupId = result.insertId;
 
-    // Add creator as admin
     const allMembers = [parseInt(currentUserId), ...(memberIds || []).filter((id) => id !== parseInt(currentUserId))];
     for (const uid of allMembers) {
       await db.query(
@@ -30,7 +29,7 @@ router.post("/create", async (req, res) => {
     }
 
     const [[group]] = await db.query(
-      `SELECT g.id, g.name, g.description, g.profile_picture, g.created_at,
+      `SELECT g.id, g.name, g.profile_picture, g.created_at,
               COUNT(gm.user_id) AS member_count
        FROM \`groups\` g
        LEFT JOIN group_members gm ON gm.group_id = g.id
@@ -55,7 +54,6 @@ router.get("/list", async (req, res) => {
       `SELECT
          g.id,
          g.name,
-         g.description,
          g.profile_picture,
          g.created_at,
          COUNT(DISTINCT gm2.user_id) AS member_count,
@@ -171,6 +169,102 @@ router.get("/members/:groupId", async (req, res) => {
       [groupId]
     );
     return res.json({ success: true, data: members, error: null });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message, data: null });
+  }
+});
+
+// PATCH /api/groups/update/:groupId
+router.patch("/update/:groupId", async (req, res) => {
+  const currentUserId = req.headers["x-current-user-id"];
+  const { groupId } = req.params;
+  const { name, profile_picture } = req.body;
+
+  const [[membership]] = await db.query(
+    `SELECT id FROM group_members WHERE group_id = ? AND user_id = ?`,
+    [groupId, currentUserId]
+  );
+  if (!membership) {
+    return res.status(403).json({ success: false, error: "Not a member", data: null });
+  }
+
+  try {
+    const updates = [];
+    const values = [];
+    if (name !== undefined) { updates.push("name = ?"); values.push(name.trim()); }
+    if (profile_picture !== undefined) { updates.push("profile_picture = ?"); values.push(profile_picture); }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ success: false, error: "Nothing to update", data: null });
+    }
+
+    values.push(groupId);
+    await db.query(`UPDATE \`groups\` SET ${updates.join(", ")} WHERE id = ?`, values);
+
+    const [[group]] = await db.query(
+      `SELECT g.id, g.name, g.profile_picture, g.created_at,
+              COUNT(gm.user_id) AS member_count
+       FROM \`groups\` g
+       LEFT JOIN group_members gm ON gm.group_id = g.id
+       WHERE g.id = ?
+       GROUP BY g.id`,
+      [groupId]
+    );
+
+    return res.json({ success: true, data: group, error: null });
+  } catch (err) {
+    console.error("Error updating group:", err);
+    return res.status(500).json({ success: false, error: err.message, data: null });
+  }
+});
+
+// POST /api/groups/members/:groupId - add a member
+router.post("/members/:groupId", async (req, res) => {
+  const currentUserId = req.headers["x-current-user-id"];
+  const { groupId } = req.params;
+  const { userId } = req.body;
+
+  const [[membership]] = await db.query(
+    `SELECT id FROM group_members WHERE group_id = ? AND user_id = ?`,
+    [groupId, currentUserId]
+  );
+  if (!membership) {
+    return res.status(403).json({ success: false, error: "Not a member", data: null });
+  }
+
+  try {
+    await db.query(
+      `INSERT IGNORE INTO group_members (group_id, user_id, role) VALUES (?, ?, 'member')`,
+      [groupId, userId]
+    );
+    const [[newMember]] = await db.query(
+      `SELECT u.id, u.username, u.profile_picture, gm.role, gm.joined_at
+       FROM group_members gm JOIN users u ON u.id = gm.user_id
+       WHERE gm.group_id = ? AND gm.user_id = ?`,
+      [groupId, userId]
+    );
+    return res.json({ success: true, data: newMember, error: null });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message, data: null });
+  }
+});
+
+// DELETE /api/groups/members/:groupId/:userId - remove a member
+router.delete("/members/:groupId/:userId", async (req, res) => {
+  const currentUserId = req.headers["x-current-user-id"];
+  const { groupId, userId } = req.params;
+
+  const [[membership]] = await db.query(
+    `SELECT id FROM group_members WHERE group_id = ? AND user_id = ?`,
+    [groupId, currentUserId]
+  );
+  if (!membership) {
+    return res.status(403).json({ success: false, error: "Not a member", data: null });
+  }
+
+  try {
+    await db.query(`DELETE FROM group_members WHERE group_id = ? AND user_id = ?`, [groupId, userId]);
+    return res.json({ success: true, data: "Member removed", error: null });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message, data: null });
   }
