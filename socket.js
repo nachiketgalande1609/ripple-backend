@@ -32,6 +32,17 @@ function initializeSocket(server, db) {
           console.error("Error checking hide_activity:", err.message);
         }
 
+        // Join all group rooms this user belongs to
+        try {
+          const [groups] = await db.query(
+            `SELECT group_id FROM group_members WHERE user_id = ?`,
+            [userId]
+          );
+          groups.forEach(({ group_id }) => socket.join(`group-${group_id}`));
+        } catch (err) {
+          console.error("Error joining group rooms:", err.message);
+        }
+
         const onlineUsers = await getVisibleOnlineUsers(db);
         io.emit("onlineUsers", onlineUsers);
 
@@ -179,6 +190,49 @@ function initializeSocket(server, db) {
         }
       } catch (err) {
         console.error("Error in sendMessage:", err.message);
+      }
+    });
+
+    socket.on("sendGroupMessage", async (data) => {
+      const { groupId, senderId, text, tempId, fileUrl, fileName, fileSize, mediaWidth, mediaHeight, replyTo } = data;
+
+      try {
+        const [result] = await db.query(
+          `INSERT INTO group_messages (group_id, sender_id, message_text, file_url, file_name, file_size, timestamp, reply_to, media_width, media_height)
+           VALUES (?, ?, ?, ?, ?, ?, CONVERT_TZ(NOW(), 'UTC', 'Asia/Kolkata'), ?, ?, ?)`,
+          [groupId, senderId, text, fileUrl, fileName, fileSize, replyTo, mediaWidth, mediaHeight]
+        );
+        const messageId = result.insertId;
+
+        const [[sender]] = await db.query(
+          `SELECT username, profile_picture FROM users WHERE id = ?`,
+          [senderId]
+        );
+
+        const senderSocketId = userSockets[senderId];
+        if (senderSocketId) {
+          io.to(senderSocketId).emit("groupMessageSaved", { tempId, messageId, timestamp: new Date().toISOString() });
+        }
+
+        socket.to(`group-${groupId}`).emit("receiveGroupMessage", {
+          message_id: messageId,
+          group_id: groupId,
+          sender_id: senderId,
+          sender_username: sender.username,
+          sender_profile_picture: sender.profile_picture,
+          message_text: text,
+          file_url: fileUrl || null,
+          file_name: fileName || null,
+          file_size: fileSize || null,
+          media_width: mediaWidth || null,
+          media_height: mediaHeight || null,
+          reply_to: replyTo || null,
+          timestamp: new Date().toISOString(),
+          reactions: [],
+          saved: true,
+        });
+      } catch (err) {
+        console.error("Error in sendGroupMessage:", err.message);
       }
     });
 

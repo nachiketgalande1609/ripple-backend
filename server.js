@@ -34,6 +34,7 @@ const keysRoutes = require("./routes/keysRoute");
 const insightsRoutes = require("./routes/insightsRoutes");
 const pollRoutes = require("./routes/pollRoutes");
 const highlightsRoutes = require("./routes/highlightsRoutes");
+const groupsRoutes = require("./routes/groupsRoute");
 
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
@@ -48,6 +49,7 @@ app.use("/api/keys", keysRoutes);
 app.use("/api/insights", insightsRoutes);
 app.use("/api/polls", pollRoutes);
 app.use("/api/highlights", highlightsRoutes);
+app.use("/api/groups", groupsRoutes);
 
 app.get("/debug/sockets", (req, res) => {
     res.json(getUserSockets());
