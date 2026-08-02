@@ -184,6 +184,50 @@ router.post("/register", async (req, res) => {
     }
 });
 
+router.post("/resend-verification", async (req, res) => {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ success: false, error: "Email is required.", data: null });
+
+    try {
+        const [rows] = await db.query("SELECT id, username, is_verified FROM users WHERE email = ?", [email]);
+        if (rows.length === 0) {
+            return res.status(404).json({ success: false, error: "No account found with that email.", data: null });
+        }
+        const user = rows[0];
+        if (user.is_verified) {
+            return res.status(400).json({ success: false, error: "Account is already verified.", data: null });
+        }
+
+        const verificationToken = jwt.sign({ email }, process.env.JWT_SECRET, { expiresIn: "1h" });
+        const tokenExpiry = new Date(Date.now() + 60 * 60 * 1000);
+        await db.query("UPDATE users SET verification_token = ?, token_expiry = ? WHERE email = ?", [verificationToken, tokenExpiry, email]);
+
+        const verificationLink = `${process.env.FRONTEND_URL}/verify-account?token=${verificationToken}`;
+        await sendEmail(
+            email,
+            "Verify your Ripple account",
+            `Click the link to verify your account: ${verificationLink}`,
+            `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #ddd; border-radius: 10px; background-color: #f9f9f9;">
+                <h2 style="color: #333;">Hey ${user.username}, here's your new verification link!</h2>
+                <p style="font-size: 16px; color: #555;">Please verify your email address to activate your Ripple account.</p>
+                <div style="text-align: center; margin: 30px 0;">
+                    <a href="${verificationLink}" style="background-color: #f4a96a; color: white; padding: 12px 25px; text-decoration: none; font-size: 16px; border-radius: 5px;">
+                        Verify Account
+                    </a>
+                </div>
+                <p style="font-size: 14px; color: #999;">This link will expire in 1 hour.</p>
+                <p style="font-size: 14px; color: #bbb; border-top: 1px solid #eee; padding-top: 15px;">If you didn't create this account, you can safely ignore this email.</p>
+            </div>
+            `,
+        );
+
+        return res.status(200).json({ success: true, error: null, data: { message: "Verification email resent." } });
+    } catch (err) {
+        return res.status(500).json({ success: false, error: err.message, data: null });
+    }
+});
+
 router.post("/login", async (req, res) => {
     const { email, password } = req.body;
 
