@@ -72,8 +72,12 @@ app.get("/debug/sockets", (req, res) => {
 // ✅ Use the shared promise pool from db.js
 const { promisePool } = require("./db");
 
-initializeSocket(server, promisePool); // ✅ pass promisePool to socket
+// Only start HTTP server locally — Vercel handles this in serverless mode
+if (process.env.VERCEL !== "1") {
+    initializeSocket(server, promisePool);
+    server.listen(port, "0.0.0.0", () => {
+        console.log(`Server running on port ${port}`);
+    });
+}
 
-server.listen(port, "0.0.0.0", () => {
-    console.log(`Server running on port ${port}`);
-});
+module.exports = app;
