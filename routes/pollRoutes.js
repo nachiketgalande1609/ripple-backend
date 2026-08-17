@@ -164,7 +164,13 @@ router.get("/feed", async (req, res) => {
             `SELECT p.*, u.username, u.profile_picture
              FROM polls p
              JOIN users u ON u.id = p.user_id
-             ORDER BY p.created_at DESC`
+             WHERE p.user_id = ?
+                OR p.user_id IN (
+                    SELECT following_id FROM follows
+                    WHERE follower_id = ? AND status = 'accepted'
+                )
+             ORDER BY p.created_at DESC`,
+            [currentUserId, currentUserId]
         );
 
         const data = await Promise.all(polls.map((poll) => buildPollResponse(poll, currentUserId)));
