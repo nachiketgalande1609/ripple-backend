@@ -20,18 +20,19 @@ const allowedOrigins = [
     "https://ripple.nachiketgalande.com",
 ];
 
-const corsOptions = {
-    origin: (origin, callback) => {
-        if (!origin || allowedOrigins.includes(origin)) {
-            callback(null, origin || "*");
-        } else {
-            callback(new Error("Not allowed by CORS"));
-        }
-    },
-    credentials: true,
-};
-app.use(cors(corsOptions));
-app.options("*", cors(corsOptions));
+app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    if (!origin || allowedOrigins.includes(origin)) {
+        res.header("Access-Control-Allow-Origin", origin || "*");
+        res.header("Access-Control-Allow-Credentials", "true");
+        res.header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
+        res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-CURRENT-USER-ID");
+    }
+    if (req.method === "OPTIONS") {
+        return res.sendStatus(200);
+    }
+    next();
+});
 
 // Routes
 const authRoutes = require("./routes/authRoutes");
